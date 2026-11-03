@@ -38,6 +38,16 @@ describe('AppController (e2e)', () => {
       .expect(401);
   });
 
+  it('contact submissions validate input and protect the admin inbox', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/contact-submissions')
+      .send({})
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/contact-submissions')
+      .expect(401);
+  });
+
   afterEach(async () => {
     await app.close();
   });

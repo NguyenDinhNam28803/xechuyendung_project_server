@@ -4,7 +4,13 @@ import { DatabaseService } from '../database/database.service.js';
 
 export type ActivityAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT';
 export type ActivityEntity =
-  'vehicle' | 'article' | 'policy' | 'regulation' | 'legal_guide' | 'system';
+  | 'vehicle'
+  | 'article'
+  | 'policy'
+  | 'regulation'
+  | 'legal_guide'
+  | 'contact_submission'
+  | 'system';
 
 export type ActivityEntry = {
   action: ActivityAction;
