@@ -31,6 +31,44 @@
 $ npm install
 ```
 
+## PostgreSQL and content API
+
+Configure these environment variables for the server:
+
+```text
+DATABASE_URL=postgresql://user:password@localhost:5432/xe_chuyen_dung
+ADMIN_USERNAME=your-admin-user
+ADMIN_PASSWORD=your-admin-password
+ADMIN_AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters-long
+PORT=4000
+```
+
+For a TLS-enabled PostgreSQL host, set `DATABASE_SSL=true`. The server verifies
+the database certificate. Keep credentials in the deployment environment or a
+local `.env` file; do not commit real secrets.
+
+Apply database changes before starting the API:
+
+```bash
+npm run db:migrate
+npm run start:dev
+```
+
+The migration creates `vehicles` and `articles`. Vehicle images, highlights,
+known details, and article sections are JSONB arrays; slugs are unique and
+publication state defaults to private.
+
+Public endpoints return published content:
+
+- `GET /api/v1/vehicles`, `GET /api/v1/vehicles/:slug`
+- `GET /api/v1/articles`, `GET /api/v1/articles/:slug`
+
+Admin login is `POST /api/v1/auth/login` with `{ "username", "password" }`.
+Use the returned bearer token for `GET`, `POST`, `PATCH`, and `DELETE` under
+`/api/v1/admin/vehicles` and `/api/v1/admin/articles`. The admin API also
+supports `POST /api/v1/admin/import-defaults`; it inserts missing slugs in a
+single transaction without overwriting existing content.
+
 ## Compile and run the project
 
 ```bash

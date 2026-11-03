@@ -23,6 +23,12 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('/api/v1/admin/vehicles (GET) requires admin authentication', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/admin/vehicles')
+      .expect(401);
+  });
+
   afterEach(async () => {
     await app.close();
   });
