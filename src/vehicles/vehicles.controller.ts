@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ParseUUIDPipe } from '@nestjs/common';
+import { insertActivity } from '../activity/activity.service.js';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
 import { insertArticle } from '../articles/articles.service.js';
 import {
@@ -95,6 +96,14 @@ export class ImportDefaultsController {
       for (const article of articleInputs) {
         const result = await insertArticle(client, article);
         articlesImported += result.rowCount ?? 0;
+      }
+      if (vehiclesImported + articlesImported > 0) {
+        await insertActivity(client, {
+          action: 'IMPORT',
+          entityType: 'system',
+          entityId: null,
+          entityLabel: `Nhập ${vehiclesImported} xe và ${articlesImported} bài viết mẫu`,
+        });
       }
       return { vehiclesImported, articlesImported };
     });

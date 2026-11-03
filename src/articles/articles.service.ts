@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
+import { insertActivity } from '../activity/activity.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { ArticleInput } from '../content/content-validation.js';
 
@@ -64,14 +65,23 @@ export class ArticlesService {
 
   async create(input: ArticleInput) {
     try {
-      const result = await this.database.query<ArticleRow>(
-        `INSERT INTO articles (
-          slug, category, title, summary, sections, is_published
-        ) VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-        RETURNING ${selectedColumns}`,
-        valuesForInsert(input),
-      );
-      return result.rows[0];
+      return await this.database.withTransaction(async (client) => {
+        const result = await client.query<ArticleRow>(
+          `INSERT INTO articles (
+            slug, category, title, summary, sections, is_published
+          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+          RETURNING ${selectedColumns}`,
+          valuesForInsert(input),
+        );
+        const article = result.rows[0];
+        await insertActivity(client, {
+          action: 'CREATE',
+          entityType: 'article',
+          entityId: article.id,
+          entityLabel: article.title,
+        });
+        return article;
+      });
     } catch (error) {
       throwIfConflict(error);
       throw error;
@@ -89,14 +99,22 @@ export class ArticlesService {
     );
     values.push(id);
     try {
-      const result = await this.database.query<ArticleRow>(
-        `UPDATE articles SET ${assignments.join(', ')}, updated_at = NOW()
-         WHERE id = $${values.length} RETURNING ${selectedColumns}`,
-        values,
-      );
-      if (!result.rows[0])
-        throw new NotFoundException('Không tìm thấy bài viết.');
-      return result.rows[0];
+      return await this.database.withTransaction(async (client) => {
+        const result = await client.query<ArticleRow>(
+          `UPDATE articles SET ${assignments.join(', ')}, updated_at = NOW()
+           WHERE id = $${values.length} RETURNING ${selectedColumns}`,
+          values,
+        );
+        const article = result.rows[0];
+        if (!article) throw new NotFoundException('Không tìm thấy bài viết.');
+        await insertActivity(client, {
+          action: 'UPDATE',
+          entityType: 'article',
+          entityId: article.id,
+          entityLabel: article.title,
+        });
+        return article;
+      });
     } catch (error) {
       throwIfConflict(error);
       throw error;
@@ -104,13 +122,20 @@ export class ArticlesService {
   }
 
   async remove(id: string) {
-    const result = await this.database.query(
-      'DELETE FROM articles WHERE id = $1',
-      [id],
-    );
-    if (result.rowCount === 0) {
-      throw new NotFoundException('Không tìm thấy bài viết.');
-    }
+    await this.database.withTransaction(async (client) => {
+      const result = await client.query<{ id: string; title: string }>(
+        'DELETE FROM articles WHERE id = $1 RETURNING id, title',
+        [id],
+      );
+      const article = result.rows[0];
+      if (!article) throw new NotFoundException('Không tìm thấy bài viết.');
+      await insertActivity(client, {
+        action: 'DELETE',
+        entityType: 'article',
+        entityId: article.id,
+        entityLabel: article.title,
+      });
+    });
   }
 }
 

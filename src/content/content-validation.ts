@@ -25,6 +25,18 @@ export type ArticleInput = {
   isPublished: boolean;
 };
 
+export type LegalResourceType = 'policy' | 'regulation' | 'legal_guide';
+
+export type LegalResourceInput = {
+  slug: string;
+  resourceType: LegalResourceType;
+  title: string;
+  summary: string;
+  content: string;
+  sourceUrl: string | null;
+  isPublished: boolean;
+};
+
 const vehicleFields = new Set([
   'slug',
   'name',
@@ -46,6 +58,15 @@ const articleFields = new Set([
   'title',
   'summary',
   'sections',
+  'isPublished',
+]);
+const legalResourceFields = new Set([
+  'slug',
+  'resourceType',
+  'title',
+  'summary',
+  'content',
+  'sourceUrl',
   'isPublished',
 ]);
 
@@ -139,6 +160,50 @@ export function parseArticleInput(
     result.sections = readSections(record.sections);
   } else {
     requireField('sections', partial);
+  }
+  assignBoolean(record, result, 'isPublished', partial);
+  return result;
+}
+
+export function parseLegalResourceInput(value: unknown): LegalResourceInput;
+export function parseLegalResourceInput(
+  value: unknown,
+  partial: true,
+): Partial<LegalResourceInput>;
+export function parseLegalResourceInput(
+  value: unknown,
+  partial = false,
+): LegalResourceInput | Partial<LegalResourceInput> {
+  const record = readRecord(value, legalResourceFields, partial);
+  const result: Partial<LegalResourceInput> = {};
+
+  assignString(record, result, 'slug', 120, partial);
+  assignString(record, result, 'title', 250, partial);
+  assignString(record, result, 'summary', 2000, partial);
+  assignString(record, result, 'content', 20000, partial);
+  if ('resourceType' in record) {
+    if (
+      record.resourceType !== 'policy' &&
+      record.resourceType !== 'regulation' &&
+      record.resourceType !== 'legal_guide'
+    ) {
+      invalid('resourceType');
+    }
+    result.resourceType = record.resourceType;
+  } else {
+    requireField('resourceType', partial);
+  }
+  if ('sourceUrl' in record) {
+    const sourceUrl = record.sourceUrl;
+    if (sourceUrl === null || sourceUrl === '') {
+      result.sourceUrl = null;
+    } else if (typeof sourceUrl === 'string' && isValidUrl(sourceUrl)) {
+      result.sourceUrl = sourceUrl;
+    } else {
+      invalid('sourceUrl');
+    }
+  } else if (!partial) {
+    result.sourceUrl = null;
   }
   assignBoolean(record, result, 'isPublished', partial);
   return result;

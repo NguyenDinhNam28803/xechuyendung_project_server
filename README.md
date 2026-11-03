@@ -69,6 +69,13 @@ Use the returned bearer token for `GET`, `POST`, `PATCH`, and `DELETE` under
 supports `POST /api/v1/admin/import-defaults`; it inserts missing slugs in a
 single transaction without overwriting existing content.
 
+Policies, regulations, and legal guides are managed through
+`/api/v1/admin/legal-resources` (`resourceType` is `policy`, `regulation`, or
+`legal_guide`). Public pages can read published resources from
+`GET /api/v1/legal-resources?type=...`. `GET /api/v1/admin/activity` returns
+the latest 100 content-management events. Content changes and their activity
+records are committed together.
+
 ## Compile and run the project
 
 ```bash

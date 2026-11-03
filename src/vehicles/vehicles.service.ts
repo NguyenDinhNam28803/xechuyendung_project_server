@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
+import { insertActivity } from '../activity/activity.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { VehicleInput } from '../content/content-validation.js';
 
@@ -78,15 +79,24 @@ export class VehiclesService {
 
   async create(input: VehicleInput) {
     try {
-      const result = await this.database.query<VehicleRow>(
-        `INSERT INTO vehicles (
-          slug, name, make, category, description, artwork, images, badge,
-          use_case, highlights, known_details, source_url, is_published
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
-        RETURNING ${selectedColumns}`,
-        valuesForInsert(input),
-      );
-      return result.rows[0];
+      return await this.database.withTransaction(async (client) => {
+        const result = await client.query<VehicleRow>(
+          `INSERT INTO vehicles (
+            slug, name, make, category, description, artwork, images, badge,
+            use_case, highlights, known_details, source_url, is_published
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
+          RETURNING ${selectedColumns}`,
+          valuesForInsert(input),
+        );
+        const vehicle = result.rows[0];
+        await insertActivity(client, {
+          action: 'CREATE',
+          entityType: 'vehicle',
+          entityId: vehicle.id,
+          entityLabel: vehicle.name,
+        });
+        return vehicle;
+      });
     } catch (error) {
       throwIfConflict(error);
       throw error;
@@ -102,13 +112,22 @@ export class VehiclesService {
     );
     values.push(id);
     try {
-      const result = await this.database.query<VehicleRow>(
-        `UPDATE vehicles SET ${assignments.join(', ')}, updated_at = NOW()
-         WHERE id = $${values.length} RETURNING ${selectedColumns}`,
-        values,
-      );
-      if (!result.rows[0]) throw new NotFoundException('Không tìm thấy xe.');
-      return result.rows[0];
+      return await this.database.withTransaction(async (client) => {
+        const result = await client.query<VehicleRow>(
+          `UPDATE vehicles SET ${assignments.join(', ')}, updated_at = NOW()
+           WHERE id = $${values.length} RETURNING ${selectedColumns}`,
+          values,
+        );
+        const vehicle = result.rows[0];
+        if (!vehicle) throw new NotFoundException('Không tìm thấy xe.');
+        await insertActivity(client, {
+          action: 'UPDATE',
+          entityType: 'vehicle',
+          entityId: vehicle.id,
+          entityLabel: vehicle.name,
+        });
+        return vehicle;
+      });
     } catch (error) {
       throwIfConflict(error);
       throw error;
@@ -116,12 +135,20 @@ export class VehiclesService {
   }
 
   async remove(id: string) {
-    const result = await this.database.query(
-      'DELETE FROM vehicles WHERE id = $1',
-      [id],
-    );
-    if (result.rowCount === 0)
-      throw new NotFoundException('Không tìm thấy xe.');
+    await this.database.withTransaction(async (client) => {
+      const result = await client.query<{ id: string; name: string }>(
+        'DELETE FROM vehicles WHERE id = $1 RETURNING id, name',
+        [id],
+      );
+      const vehicle = result.rows[0];
+      if (!vehicle) throw new NotFoundException('Không tìm thấy xe.');
+      await insertActivity(client, {
+        action: 'DELETE',
+        entityType: 'vehicle',
+        entityId: vehicle.id,
+        entityLabel: vehicle.name,
+      });
+    });
   }
 }
 

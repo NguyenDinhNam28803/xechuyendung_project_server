@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ActivityModule } from '../activity/activity.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import {
   ArticlesController,
@@ -7,7 +8,7 @@ import {
 import { ArticlesService } from './articles.service.js';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ActivityModule],
   controllers: [ArticlesController, AdminArticlesController],
   providers: [ArticlesService],
   exports: [ArticlesService],

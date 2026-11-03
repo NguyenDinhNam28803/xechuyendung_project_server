@@ -29,6 +29,15 @@ describe('AppController (e2e)', () => {
       .expect(401);
   });
 
+  it('admin legal resources and activity require authentication', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/legal-resources')
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/activity')
+      .expect(401);
+  });
+
   afterEach(async () => {
     await app.close();
   });
