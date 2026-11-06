@@ -9,11 +9,19 @@ import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 export class DatabaseService implements OnModuleDestroy {
   private readonly pool: Pool | undefined;
 
+  get isConfigured() {
+    return this.pool !== undefined;
+  }
+
   constructor() {
     const connectionString = process.env.DATABASE_URL;
     if (connectionString) {
       this.pool = new Pool({
         connectionString,
+        max: 10,
+        connectionTimeoutMillis: 5_000,
+        idleTimeoutMillis: 30_000,
+        query_timeout: 10_000,
         ssl:
           process.env.DATABASE_SSL === 'true'
             ? { rejectUnauthorized: true }
@@ -32,6 +40,11 @@ export class DatabaseService implements OnModuleDestroy {
     return this.pool.query<Row>(text, values);
   }
 
+  async checkHealth() {
+    await this.query<{ ok: number }>('SELECT 1 AS ok');
+    return true;
+  }
+
   async withTransaction<Result>(
     operation: (client: PoolClient) => Promise<Result>,
   ): Promise<Result> {
@@ -46,7 +59,14 @@ export class DatabaseService implements OnModuleDestroy {
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error(
+          'Unable to roll back PostgreSQL transaction.',
+          rollbackError,
+        );
+      }
       throw error;
     } finally {
       client.release();

@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { insertActivity } from '../activity/activity.service.js';
+import {
+  type PageResult,
+  type PaginationQuery,
+  toPageResult,
+} from '../common/pagination.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { VehicleInput } from '../content/content-validation.js';
 
@@ -69,12 +74,24 @@ export class VehiclesService {
     return toPublicVehicle(result.rows[0]);
   }
 
-  async findAll() {
-    const result = await this.database.query<VehicleRow>(
-      `SELECT ${selectedColumns} FROM vehicles
-       ORDER BY created_at DESC, id`,
-    );
-    return result.rows;
+  async findAll(query: PaginationQuery): Promise<PageResult<VehicleRow>> {
+    const filter = query.search
+      ? 'WHERE name ILIKE $1 OR make ILIKE $1 OR category ILIKE $1 OR slug ILIKE $1'
+      : '';
+    const filterValues = query.search ? [`%${query.search}%`] : [];
+    const [result, count] = await Promise.all([
+      this.database.query<VehicleRow>(
+        `SELECT ${selectedColumns} FROM vehicles ${filter}
+         ORDER BY created_at DESC, id
+         LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
+        [...filterValues, query.limit, query.offset],
+      ),
+      this.database.query<{ total: string }>(
+        `SELECT COUNT(*)::text AS total FROM vehicles ${filter}`,
+        filterValues,
+      ),
+    ]);
+    return toPageResult(result.rows, Number(count.rows[0].total), query);
   }
 
   async create(input: VehicleInput) {

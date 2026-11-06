@@ -8,6 +8,11 @@ import {
   insertActivity,
   type ActivityEntity,
 } from '../activity/activity.service.js';
+import {
+  type PageResult,
+  type PaginationQuery,
+  toPageResult,
+} from '../common/pagination.js';
 import { DatabaseService } from '../database/database.service.js';
 import type {
   LegalResourceInput,
@@ -65,12 +70,37 @@ export class LegalResourcesService {
     return result.rows;
   }
 
-  async findAll() {
-    const result = await this.database.query<LegalResourceRow>(
-      `SELECT ${selectedColumns} FROM legal_resources
-       ORDER BY updated_at DESC, id`,
-    );
-    return result.rows;
+  async findAll(
+    query: PaginationQuery,
+    resourceType?: LegalResourceType,
+  ): Promise<PageResult<LegalResourceRow>> {
+    const conditions: string[] = [];
+    const filterValues: string[] = [];
+    if (resourceType) {
+      filterValues.push(resourceType);
+      conditions.push(`resource_type = $${filterValues.length}`);
+    }
+    if (query.search) {
+      filterValues.push(`%${query.search}%`);
+      const parameter = `$${filterValues.length}`;
+      conditions.push(
+        `(title ILIKE ${parameter} OR slug ILIKE ${parameter} OR summary ILIKE ${parameter} OR content ILIKE ${parameter})`,
+      );
+    }
+    const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const [result, count] = await Promise.all([
+      this.database.query<LegalResourceRow>(
+        `SELECT ${selectedColumns} FROM legal_resources ${filter}
+         ORDER BY updated_at DESC, id
+         LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
+        [...filterValues, query.limit, query.offset],
+      ),
+      this.database.query<{ total: string }>(
+        `SELECT COUNT(*)::text AS total FROM legal_resources ${filter}`,
+        filterValues,
+      ),
+    ]);
+    return toPageResult(result.rows, Number(count.rows[0].total), query);
   }
 
   async create(input: LegalResourceInput) {

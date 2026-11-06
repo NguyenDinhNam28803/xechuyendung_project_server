@@ -23,6 +23,13 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('exposes an independent liveness check', () => {
+    return request(app.getHttpServer())
+      .get('/health/live')
+      .expect(200)
+      .expect({ status: 'ok' });
+  });
+
   it('/api/v1/admin/vehicles (GET) requires admin authentication', () => {
     return request(app.getHttpServer())
       .get('/api/v1/admin/vehicles')
@@ -46,6 +53,24 @@ describe('AppController (e2e)', () => {
     await request(app.getHttpServer())
       .get('/api/v1/admin/contact-submissions')
       .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/contact-submissions/search')
+      .send({ search: 'phone' })
+      .expect(401);
+  });
+
+  it('rate limits repeated admin login attempts', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ username: 'invalid', password: 'invalid' });
+      expect(response.status).not.toBe(429);
+    }
+    const limited = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ username: 'invalid', password: 'invalid' });
+    expect(limited.status).toBe(429);
+    expect(limited.headers['retry-after']).toBeDefined();
   });
 
   afterEach(async () => {

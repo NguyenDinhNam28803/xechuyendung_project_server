@@ -2,7 +2,8 @@
 
 REST API viết bằng NestJS/TypeScript, cung cấp nội dung công khai, API quản trị
 và tiếp nhận yêu cầu liên hệ. Dữ liệu được lưu trong PostgreSQL bằng thư viện
-`pg` và các migration SQL trong `migrations/`.
+`pg` và các migration SQL trong `migrations/`. Hợp đồng OpenAPI được duy trì
+tại [`openapi.yaml`](./openapi.yaml).
 
 ## Kiến trúc
 
@@ -33,6 +34,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-a-strong-unique-password
 ADMIN_AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
 PORT=4000
+TRUST_PROXY=0
 ```
 
 - `DATABASE_URL`: connection string PostgreSQL; giữ bí mật, không đưa xuống
@@ -41,6 +43,10 @@ PORT=4000
   cầu của nhà cung cấp PostgreSQL.
 - `ADMIN_AUTH_SECRET`: bắt buộc dài ít nhất 32 ký tự.
 - `PORT`: mặc định `4000`.
+- `TRUST_PROXY`: mặc định tắt. Sau deploy sau reverse proxy, đặt thành đúng
+  số hop hoặc subnet tin cậy; không tin proxy do người dùng có thể bypass.
+- Server giới hạn JSON request ở 64 KiB; form liên hệ qua Next.js đặt giới hạn
+  request nhỏ hơn.
 
 Ứng dụng và migration runner đều nạp biến từ `.env`. Nếu thiếu `DATABASE_URL`,
 server có thể khởi động nhưng thao tác database sẽ trả lỗi dịch vụ chưa khả
@@ -54,7 +60,9 @@ npm run db:migrate
 npm run start:dev
 ```
 
-API mặc định tại `http://localhost:4000`; root `GET /` trả `Hello World!`.
+API mặc định tại `http://localhost:4000`; root `GET /` vẫn là route mẫu
+`Hello World!`. Dùng `GET /health/live` để kiểm tra process và
+`GET /health/ready` để kiểm tra thêm kết nối PostgreSQL.
 Khởi chạy client trong terminal khác và đặt `CONTENT_API_URL` thành
 `http://localhost:4000/api/v1`. Xem [README client](../client/README.md).
 
@@ -72,25 +80,37 @@ Khởi chạy client trong terminal khác và đặt `CONTENT_API_URL` thành
 | `POST` | `/api/v1/contact-submissions`      | Lưu yêu cầu liên hệ hợp lệ           |
 | `POST` | `/api/v1/auth/login`               | Đăng nhập admin                      |
 
+`POST /api/v1/auth/login` giới hạn 5 request mỗi IP trong 15 phút;
+`POST /api/v1/contact-submissions` giới hạn 10 request mỗi IP mỗi giờ. Đây là
+rate limiter trong bộ nhớ của từng process, không thay thế rate limit phân tán
+ở WAF/reverse proxy. Đặt `TRUST_PROXY` chính xác để server nhận IP client thật.
+
 ### Quản trị — cần `Authorization: Bearer <token>`
 
-| Method            | Đường dẫn                                      | Mô tả                          |
-| ----------------- | ---------------------------------------------- | ------------------------------ |
-| `GET`, `POST`     | `/api/v1/admin/vehicles`                       | Liệt kê/tạo xe                 |
-| `PATCH`, `DELETE` | `/api/v1/admin/vehicles/:id`                   | Sửa/xóa xe                     |
-| `GET`, `POST`     | `/api/v1/admin/articles`                       | Liệt kê/tạo bài viết           |
-| `PATCH`, `DELETE` | `/api/v1/admin/articles/:id`                   | Sửa/xóa bài viết               |
-| `POST`            | `/api/v1/admin/import-defaults`                | Thêm nội dung mẫu còn thiếu    |
-| `GET`, `POST`     | `/api/v1/admin/legal-resources`                | Liệt kê/tạo tài liệu pháp lý   |
-| `PATCH`, `DELETE` | `/api/v1/admin/legal-resources/:id`            | Sửa/xóa tài liệu               |
-| `GET`             | `/api/v1/admin/activity`                       | Các hoạt động gần đây          |
-| `GET`             | `/api/v1/admin/contact-submissions`            | Tối đa 200 yêu cầu mới nhất    |
-| `PATCH`           | `/api/v1/admin/contact-submissions/:id/status` | Cập nhật trạng thái            |
-| `DELETE`          | `/api/v1/admin/contact-submissions/:id`        | Xóa yêu cầu và dữ liệu liên hệ |
+| Method            | Đường dẫn                                      | Mô tả                           |
+| ----------------- | ---------------------------------------------- | ------------------------------- |
+| `GET`, `POST`     | `/api/v1/admin/vehicles`                       | Liệt kê/tạo xe                  |
+| `PATCH`, `DELETE` | `/api/v1/admin/vehicles/:id`                   | Sửa/xóa xe                      |
+| `GET`, `POST`     | `/api/v1/admin/articles`                       | Liệt kê/tạo bài viết            |
+| `PATCH`, `DELETE` | `/api/v1/admin/articles/:id`                   | Sửa/xóa bài viết                |
+| `POST`            | `/api/v1/admin/import-defaults`                | Thêm nội dung mẫu còn thiếu     |
+| `GET`, `POST`     | `/api/v1/admin/legal-resources`                | Liệt kê/tạo tài liệu pháp lý    |
+| `PATCH`, `DELETE` | `/api/v1/admin/legal-resources/:id`            | Sửa/xóa tài liệu                |
+| `GET`             | `/api/v1/admin/activity`                       | Các hoạt động gần đây           |
+| `GET`             | `/api/v1/admin/contact-submissions`            | Danh sách phân trang            |
+| `POST`            | `/api/v1/admin/contact-submissions/search`     | Tìm contact, từ khóa trong body |
+| `PATCH`           | `/api/v1/admin/contact-submissions/:id/status` | Cập nhật trạng thái             |
+| `DELETE`          | `/api/v1/admin/contact-submissions/:id`        | Xóa yêu cầu và dữ liệu liên hệ  |
 
 Login nhận `{ "username": "...", "password": "..." }`, trả
 `accessToken` và `expiresIn` (giây). Trang quản trị dùng Next.js API proxy để
 giữ token trong cookie `HttpOnly`; không lưu token trong `localStorage`.
+
+Các danh sách admin hỗ trợ `page` (bắt đầu từ 1), `limit` (mặc định 25, tối
+đa 100) và `q` (tối đa 100 ký tự). Activity mặc định trả tối đa 100 mục. Kết
+quả có dạng `{ items, pagination: { page, limit, total, totalPages } }`;
+contact search nhận `{ "search": "..." }` trong body để tránh đưa dữ liệu cá
+nhân lên URL/log truy cập. Danh sách nội dung public hiện chưa phân trang.
 
 ### Validation và dữ liệu
 
@@ -107,6 +127,11 @@ giữ token trong cookie `HttpOnly`; không lưu token trong `localStorage`.
 - Cập nhật/xóa nội dung và hoạt động tương ứng được ghi trong transaction.
   Audit log của yêu cầu liên hệ không ghi thông tin nhận dạng hoặc nội dung
   tin nhắn.
+- Theo thời hạn đã được doanh nghiệp duyệt là **90 ngày**, server xóa contact
+  cũ hơn 90 ngày khi khởi động và sau đó mỗi 24 giờ. Mỗi lần xóa có activity
+  tổng hợp do `system` tạo, không kèm dữ liệu cá nhân. Xóa khỏi database đang
+  hoạt động không tự xóa dữ liệu trong backup; lịch backup/retention cần được
+  cấu hình tương ứng.
 
 ## PostgreSQL và migrations
 
@@ -136,11 +161,20 @@ npm test            # Unit tests (Vitest)
 npm run test:e2e    # HTTP/auth/validation e2e tests
 npm run test:cov    # Coverage
 npm run db:migrate  # Áp dụng migration
+npm run test:integration # PostgreSQL integration; requires explicit opt-in below
 ```
 
-Các test hiện kiểm tra validation nội dung, auth token, quyền truy cập admin
-và một số HTTP routes. E2E suite chưa xác minh đầy đủ CRUD PostgreSQL thật;
-luồng database nên tiếp tục được kiểm thử trên database staging riêng.
+Các test hiện kiểm tra validation nội dung, auth token, quyền truy cập admin,
+pagination, rate limit, health controller và một số HTTP routes. E2E suite
+chưa xác minh đầy đủ CRUD PostgreSQL thật; luồng database nên tiếp tục được
+kiểm thử trên database staging riêng.
+
+Integration test chỉ chạy khi có `TEST_DATABASE_URL` và
+`RUN_POSTGRES_INTEGRATION=true`; database đích phải khác database ứng dụng và
+có tên chứa `test`. Suite chạy migrations lên database đích rồi tạo/xóa dữ
+liệu kiểm thử và kiểm tra retention/audit. Chỉ bật cờ này với database
+disposable riêng; không dùng production hoặc database có dữ liệu khách hàng.
+Không đưa connection string vào command history hay gửi trong chat.
 
 ## Chạy production
 
@@ -156,23 +190,47 @@ cập được PostgreSQL; Next.js phải truy cập được URL NestJS đượ
 `CONTENT_API_URL`. Nếu database yêu cầu TLS, bật `DATABASE_SSL=true`. Dùng
 HTTPS cho các kết nối bên ngoài và không expose PostgreSQL trực tiếp ra Internet.
 
+### Checklist triển khai và khôi phục
+
+1. Cấu hình secrets trong secret store của môi trường deploy; xác minh
+   `DATABASE_SSL` và `TRUST_PROXY` theo đúng nhà cung cấp. Không chép `.env`
+   thật vào log, ticket hoặc repository.
+2. Tạo/kiểm tra backup PostgreSQL trước migration. Deploy API, chạy
+   `npm run db:migrate` trong quy trình phát hành, sau đó build/start server và
+   Next.js với `CONTENT_API_URL` trỏ đến API có thể truy cập từ máy chạy
+   Next.js.
+3. Kiểm tra `GET /health/live`, `GET /health/ready`, đăng nhập admin, xem danh
+   sách phân trang, gửi form thử trên staging và kiểm tra log bằng request ID.
+   Không dùng dữ liệu khách hàng thật khi smoke test.
+4. Theo dõi lỗi HTTP 5xx, độ trễ API và trạng thái PostgreSQL qua nền tảng
+   giám sát; cấu hình alert/WAF và rate limit tại reverse proxy. Không tin
+   `X-Forwarded-For` nếu `TRUST_PROXY` không khớp topology thực tế.
+5. Nếu phát hành lỗi, dừng rollout và khôi phục phiên bản ứng dụng trước.
+   Migration phải tương thích ngược; không tự động chạy rollback SQL. Chỉ
+   restore backup sau khi đánh giá ảnh hưởng dữ liệu và chọn đúng restore
+   point. Diễn tập quy trình này trên staging trước khi production.
+
+Retention 90 ngày áp dụng cho database đang chạy; backup có vòng đời riêng.
+Doanh nghiệp cần xác nhận retention/ủy quyền truy cập backup và diễn tập restore
+định kỳ, vì xóa một submission khỏi database không xóa bản sao backup đã tạo.
+
 ## Giới hạn và việc cần hoàn thiện trước production
 
-- Chưa có rate limiting ở ứng dụng cho form liên hệ hoặc đăng nhập; đặt giới
-  hạn ở reverse proxy/WAF trước khi public.
+- Rate limit ứng dụng hiện lưu state trong RAM, chỉ áp dụng trong từng process;
+  cần rate limit phân tán tại WAF/reverse proxy khi chạy nhiều instance.
 - Chống bot ở form chỉ là honeypot cơ bản, không thay thế rate limit hoặc biện
   pháp chống abuse.
 - Admin hiện dùng một tài khoản/mật khẩu dùng chung qua environment; chưa có
   quản lý nhiều người dùng, phân quyền theo vai trò, đổi mật khẩu hoặc thu hồi
   token trước hạn 8 giờ.
-- Chưa có retention/purge tự động cho contact submissions. Cần xác định thời
-  hạn lưu, người chịu trách nhiệm và quy trình xử lý yêu cầu xóa/truy cập dữ
-  liệu cá nhân.
-- Chưa có endpoint health/readiness riêng, metrics/alerting hoặc hướng dẫn
-  restore backup. Root endpoint chỉ là route mẫu, không xác nhận database sẵn
-  sàng.
-- Chưa có API upload ảnh, phân trang đầy đủ cho các danh sách quản trị hoặc
-  kiểm thử tích hợp PostgreSQL trong CI.
+- Retention 90 ngày đã được duyệt và purge tự động đã được thêm cho dữ liệu
+  live; vẫn cần cấu hình/xác nhận thời hạn lưu backup và quy trình quyền riêng tư.
+- `/health/live` và `/health/ready` đã có; metrics/alerting và diễn tập restore
+  vẫn cần cấu hình ở hạ tầng.
+- Chưa có API upload ảnh hoặc kiểm thử tích hợp PostgreSQL trong CI.
+- Client/server build, lint, unit và HTTP e2e đã được xác minh; chưa được xem
+  là sign-off production khi chưa có kiểm thử PostgreSQL trên database riêng,
+  staging smoke test, restore rehearsal và kiểm tra WAF/proxy.
 
 README này mô tả hiện trạng mã nguồn; không thay thế đánh giá pháp lý, threat
 model, kiểm thử tải hoặc rà soát bảo mật trước khi phục vụ người dùng thật.

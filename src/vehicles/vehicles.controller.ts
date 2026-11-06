@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ParseUUIDPipe } from '@nestjs/common';
@@ -18,6 +19,7 @@ import {
   parseVehicleInput,
 } from '../content/content-validation.js';
 import { DatabaseService } from '../database/database.service.js';
+import { parsePaginationQuery } from '../common/pagination.js';
 import { insertVehicle, VehiclesService } from './vehicles.service.js';
 
 @Controller('api/v1/vehicles')
@@ -41,8 +43,12 @@ export class AdminVehiclesController {
   constructor(private readonly vehicles: VehiclesService) {}
 
   @Get()
-  findAll() {
-    return this.vehicles.findAll();
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('q') search?: string,
+  ) {
+    return this.vehicles.findAll(parsePaginationQuery(page, limit, search));
   }
 
   @Post()

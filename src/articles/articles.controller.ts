@@ -6,10 +6,12 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ParseUUIDPipe } from '@nestjs/common';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
+import { parsePaginationQuery } from '../common/pagination.js';
 import { parseArticleInput } from '../content/content-validation.js';
 import { ArticlesService } from './articles.service.js';
 
@@ -34,8 +36,12 @@ export class AdminArticlesController {
   constructor(private readonly articles: ArticlesService) {}
 
   @Get()
-  findAll() {
-    return this.articles.findAll();
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('q') search?: string,
+  ) {
+    return this.articles.findAll(parsePaginationQuery(page, limit, search));
   }
 
   @Post()

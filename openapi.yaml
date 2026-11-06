@@ -1,0 +1,783 @@
+openapi: 3.1.0
+info:
+  title: Xe Chuyên Dụng API
+  version: 1.0.0
+  description: Public content, admin CMS, activity history, and contact intake API.
+servers:
+  - url: http://localhost:4000
+    description: Local development
+tags:
+  - name: Health
+  - name: Authentication
+  - name: Public content
+  - name: Admin content
+  - name: Contact submissions
+paths:
+  /:
+    get:
+      summary: Root health message
+      responses:
+        "200":
+          description: The API process is responding.
+          content:
+            text/plain:
+              schema: { type: string, example: Hello World! }
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Process liveness
+      responses:
+        "200":
+          description: The process is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Database readiness
+      responses:
+        "200":
+          description: PostgreSQL is reachable.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ready }
+                  checks:
+                    type: object
+                    properties:
+                      database: { type: string, const: ok }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Exchange configured admin credentials for an access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Login succeeded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, expiresIn]
+                properties:
+                  accessToken: { type: string }
+                  expiresIn: { type: integer, description: Lifetime in seconds. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/vehicles:
+    get:
+      tags: [Public content]
+      summary: List published vehicles
+      responses:
+        "200":
+          description: Published vehicles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Vehicle" }
+  /api/v1/vehicles/{slug}:
+    get:
+      tags: [Public content]
+      summary: Get a published vehicle by slug
+      parameters:
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Published vehicle.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vehicle" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/articles:
+    get:
+      tags: [Public content]
+      summary: List published articles
+      responses:
+        "200":
+          description: Published articles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Article" }
+  /api/v1/articles/{slug}:
+    get:
+      tags: [Public content]
+      summary: Get a published article by slug
+      parameters:
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Published article.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/legal-resources:
+    get:
+      tags: [Public content]
+      summary: List published legal resources
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [policy, regulation, legal_guide]
+      responses:
+        "200":
+          description: Published legal resources.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LegalResource" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /api/v1/contact-submissions:
+    post:
+      tags: [Contact submissions]
+      summary: Submit a contact request
+      description: Requires explicit consent; honeypot field should be empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactSubmissionInput" }
+      responses:
+        "201":
+          description: Submission accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, id]
+                properties:
+                  ok: { type: boolean, const: true }
+                  id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /api/v1/admin/vehicles:
+    get:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: List vehicles including drafts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: A page of vehicles.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehiclePage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Create a vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehicleInput" }
+      responses:
+        "201": { description: Created. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/vehicles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Partially update a vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehiclePatch" }
+      responses:
+        "200": { description: Updated. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Delete a vehicle
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/articles:
+    get:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: List articles including drafts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: A page of articles.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticlePage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Create an article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleInput" }
+      responses:
+        "201": { description: Created. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/articles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Partially update an article
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticlePatch" }
+      responses:
+        "200": { description: Updated. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Delete an article
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/import-defaults:
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Import missing sample vehicles and articles without overwriting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicles, articles]
+              properties:
+                vehicles:
+                  type: array
+                  items: { $ref: "#/components/schemas/VehicleInput" }
+                articles:
+                  type: array
+                  items: { $ref: "#/components/schemas/ArticleInput" }
+      responses:
+        "201": { description: Imported missing records. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/legal-resources:
+    get:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: List legal resources including drafts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [policy, regulation, legal_guide]
+      responses:
+        "200":
+          description: A page of legal resources.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LegalResourcePage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Create a legal resource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegalResourceInput" }
+      responses:
+        "201": { description: Created. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/legal-resources/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Partially update a legal resource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LegalResourcePatch" }
+      responses:
+        "200": { description: Updated. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Delete a legal resource
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/activity:
+    get:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: List recent activity
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: A page of recent events.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/contact-submissions:
+    get:
+      tags: [Contact submissions]
+      security: [{ AdminBearer: [] }]
+      summary: List recent contact requests
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of contact submissions, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContactSubmissionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/contact-submissions/search:
+    post:
+      tags: [Contact submissions]
+      security: [{ AdminBearer: [] }]
+      summary: Search contact requests without putting personal data in the URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContactSubmissionSearch" }
+      responses:
+        "200":
+          description: A page of matching contact submissions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContactSubmissionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/contact-submissions/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Contact submissions]
+      security: [{ AdminBearer: [] }]
+      summary: Update the contact request lifecycle status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [new, in_progress, contacted, closed, spam]
+      responses:
+        "200": { description: Status updated. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/contact-submissions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [Contact submissions]
+      security: [{ AdminBearer: [] }]
+      summary: Permanently delete a contact request
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    AdminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: HMAC-signed admin token
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, maxLength: 120 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Search:
+      name: q
+      in: query
+      schema: { type: string, maxLength: 100 }
+  schemas:
+    Vehicle:
+      allOf:
+        - $ref: "#/components/schemas/VehicleFields"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    VehicleFields:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        make: { type: string }
+        category: { type: string }
+        description: { type: string }
+        artwork: { type: string, enum: [cargo, fire, rescue] }
+        images: { type: array, items: { type: string } }
+        badge: { type: string }
+        useCase: { type: string }
+        highlights: { type: array, items: { type: string } }
+        knownDetails:
+          type: array
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: string }
+        sourceUrl: { type: [string, "null"], format: uri }
+        isPublished: { type: boolean }
+    VehicleInput:
+      allOf:
+        - $ref: "#/components/schemas/VehicleFields"
+      required:
+        - slug
+        - name
+        - make
+        - category
+        - description
+        - artwork
+        - images
+        - badge
+        - useCase
+        - highlights
+        - knownDetails
+        - isPublished
+    VehiclePatch:
+      allOf:
+        - $ref: "#/components/schemas/VehicleFields"
+      minProperties: 1
+      description: One or more mutable vehicle fields; id is not accepted.
+    Article:
+      allOf:
+        - $ref: "#/components/schemas/ArticleFields"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    ArticleFields:
+      type: object
+      properties:
+        slug: { type: string }
+        category: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        sections:
+          type: array
+          items:
+            type: object
+            required: [heading, paragraphs]
+            properties:
+              heading: { type: string }
+              paragraphs: { type: array, items: { type: string } }
+        isPublished: { type: boolean }
+    ArticleInput:
+      allOf:
+        - $ref: "#/components/schemas/ArticleFields"
+      required: [slug, category, title, summary, sections, isPublished]
+    ArticlePatch:
+      allOf:
+        - $ref: "#/components/schemas/ArticleFields"
+      minProperties: 1
+      description: One or more mutable article fields; id is not accepted.
+    LegalResource:
+      allOf:
+        - $ref: "#/components/schemas/LegalResourceFields"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    LegalResourceFields:
+      type: object
+      properties:
+        slug: { type: string }
+        resourceType: { type: string, enum: [policy, regulation, legal_guide] }
+        title: { type: string }
+        summary: { type: string }
+        content: { type: string }
+        sourceUrl: { type: [string, "null"], format: uri }
+        isPublished: { type: boolean }
+    LegalResourceInput:
+      allOf:
+        - $ref: "#/components/schemas/LegalResourceFields"
+      required:
+        - slug
+        - resourceType
+        - title
+        - summary
+        - content
+        - isPublished
+    LegalResourcePatch:
+      allOf:
+        - $ref: "#/components/schemas/LegalResourceFields"
+      minProperties: 1
+      description: One or more mutable resource fields; id is not accepted.
+    ContactSubmissionSearch:
+      type: object
+      properties:
+        page: { type: integer, minimum: 1, default: 1 }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        search: { type: string, maxLength: 100 }
+    ContactSubmissionInput:
+      type: object
+      required: [name, phone, category, consent]
+      properties:
+        name: { type: string, maxLength: 100 }
+        phone: { type: string, maxLength: 20 }
+        category:
+          type: string
+          enum:
+            - Xe tải
+            - Xe chữa cháy
+            - Xe cứu hộ
+            - Xe bồn / xe môi trường
+            - Khác / cần tư vấn
+        location: { type: string, maxLength: 80 }
+        message: { type: string, maxLength: 1000 }
+        vehicleSlug: { type: string, maxLength: 120 }
+        consent: { type: boolean, const: true }
+        companyWebsite:
+          type: string
+          description: Honeypot field; must be empty.
+    ContactSubmission:
+      type: object
+      required:
+        - id
+        - name
+        - phone
+        - category
+        - location
+        - message
+        - vehicleSlug
+        - status
+        - consentText
+        - consentAt
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string }
+        category: { type: string }
+        location: { type: string }
+        message: { type: string }
+        vehicleSlug: { type: [string, "null"] }
+        status:
+          type: string
+          enum: [new, in_progress, contacted, closed, spam]
+        consentText: { type: string }
+        consentAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PageInfo:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    VehiclePage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Vehicle" }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
+    ArticlePage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Article" }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
+    LegalResourcePage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/LegalResource" }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
+    ContactSubmissionPage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContactSubmission" }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
+    ActivityPage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - actor
+              - action
+              - entityType
+              - entityLabel
+              - createdAt
+            properties:
+              id: { type: string, format: uuid }
+              actor: { type: string }
+              action: { type: string, enum: [CREATE, UPDATE, DELETE, IMPORT] }
+              entityType:
+                type: string
+                enum:
+                  - vehicle
+                  - article
+                  - policy
+                  - regulation
+                  - legal_guide
+                  - contact_submission
+                  - system
+              entityId: { type: [string, "null"], format: uuid }
+              entityLabel: { type: string }
+              createdAt: { type: string, format: date-time }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
+    Error:
+      type: object
+      properties:
+        statusCode: { type: integer }
+        message:
+          oneOf:
+            - { type: string }
+            - { type: array, items: { type: string } }
+        error: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid request data.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid admin authentication.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Requested record does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: A record with the requested slug already exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Rate limit exceeded. Retry after the indicated delay.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: Request body exceeds the allowed size.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServiceUnavailable:
+      description: Required API or database service is unavailable.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

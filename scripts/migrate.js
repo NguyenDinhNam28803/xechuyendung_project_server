@@ -20,8 +20,11 @@ const pool = new Pool({
       : undefined,
 });
 
+const migrationLockId = 7_804_202_026;
+const client = await pool.connect();
 try {
-  await pool.query(`
+  await client.query('SELECT pg_advisory_lock($1)', [migrationLockId]);
+  await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY,
       applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -33,13 +36,12 @@ try {
     .sort();
 
   for (const file of files) {
-    const alreadyApplied = await pool.query(
+    const alreadyApplied = await client.query(
       'SELECT 1 FROM schema_migrations WHERE name = $1',
       [file],
     );
     if (alreadyApplied.rowCount) continue;
 
-    const client = await pool.connect();
     try {
       await client.query('BEGIN');
       await client.query(
@@ -51,12 +53,19 @@ try {
       await client.query('COMMIT');
       console.info(`Applied migration ${file}.`);
     } catch (error) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Unable to roll back failed migration.', rollbackError);
+      }
       throw error;
-    } finally {
-      client.release();
     }
   }
 } finally {
-  await pool.end();
+  try {
+    await client.query('SELECT pg_advisory_unlock($1)', [migrationLockId]);
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }
