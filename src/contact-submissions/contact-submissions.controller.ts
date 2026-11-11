@@ -11,7 +11,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import type { Actor } from '../activity/activity.service.js';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
+import { CurrentActor } from '../auth/admin-principal.js';
 import { parsePaginationQuery } from '../common/pagination.js';
 import { RateLimit, RateLimitGuard } from '../security/rate-limit.guard.js';
 import {
@@ -66,6 +68,7 @@ export class AdminContactSubmissionsController {
   updateStatus(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: unknown,
+    @CurrentActor() actor: Actor,
   ) {
     if (
       typeof body !== 'object' ||
@@ -77,7 +80,11 @@ export class AdminContactSubmissionsController {
     ) {
       throw new BadRequestException('Trạng thái yêu cầu không hợp lệ.');
     }
-    return this.submissions.updateStatus(id, body.status as ContactStatus);
+    return this.submissions.updateStatus(
+      id,
+      body.status as ContactStatus,
+      actor,
+    );
   }
 
   @Post('search')
@@ -114,8 +121,11 @@ export class AdminContactSubmissionsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.submissions.remove(id);
+  async remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentActor() actor: Actor,
+  ) {
+    await this.submissions.remove(id, actor);
     return { ok: true };
   }
 }

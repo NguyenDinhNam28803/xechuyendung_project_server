@@ -11,7 +11,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import type { Actor } from '../activity/activity.service.js';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
+import { CurrentActor } from '../auth/admin-principal.js';
 import { parsePaginationQuery } from '../common/pagination.js';
 import {
   parseLegalResourceInput,
@@ -62,18 +64,29 @@ export class AdminLegalResourcesController {
   }
 
   @Post()
-  create(@Body() body: unknown) {
-    return this.legalResources.create(parseLegalResourceInput(body));
+  create(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.legalResources.create(parseLegalResourceInput(body), actor);
   }
 
   @Patch(':id')
-  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
-    return this.legalResources.update(id, parseLegalResourceInput(body, true));
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.legalResources.update(
+      id,
+      parseLegalResourceInput(body, true),
+      actor,
+    );
   }
 
   @Delete(':id')
-  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.legalResources.remove(id);
+  async remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentActor() actor: Actor,
+  ) {
+    await this.legalResources.remove(id, actor);
     return { ok: true };
   }
 }

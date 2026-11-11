@@ -28,7 +28,7 @@ export class RateLimitGuard implements CanActivate {
     private readonly rateLimit: RateLimitService,
   ) {}
 
-  canActivate(context: ExecutionContext) {
+  async canActivate(context: ExecutionContext) {
     const options = this.reflector.getAllAndOverride<RateLimitOptions>(
       rateLimitMetadataKey,
       [context.getHandler(), context.getClass()],
@@ -37,10 +37,15 @@ export class RateLimitGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
+    // request.ip chỉ đáng tin khi TRUST_PROXY khớp với topology triển khai.
     const clientAddress =
       request.ip || request.socket.remoteAddress || 'unknown';
     const key = `${request.method}:${request.route?.path ?? request.path}:${clientAddress}`;
-    const result = this.rateLimit.consume(key, options.limit, options.windowMs);
+    const result = await this.rateLimit.consume(
+      key,
+      options.limit,
+      options.windowMs,
+    );
 
     if (!result.allowed) {
       response.setHeader('Retry-After', String(result.retryAfterSeconds));

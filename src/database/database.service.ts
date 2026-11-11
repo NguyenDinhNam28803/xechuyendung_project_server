@@ -73,6 +73,26 @@ export class DatabaseService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Chạy `operation` trong transaction chỉ khi giành được advisory lock
+   * `lockKey`. Khi nhiều instance cùng chạy job định kỳ, chỉ một instance thực
+   * hiện; các instance còn lại bỏ qua ngay (không chờ). Lock tự nhả khi
+   * transaction kết thúc.
+   */
+  async runExclusive<Result>(
+    lockKey: number,
+    operation: (client: PoolClient) => Promise<Result>,
+  ): Promise<{ acquired: false } | { acquired: true; result: Result }> {
+    return this.withTransaction(async (client) => {
+      const lock = await client.query<{ acquired: boolean }>(
+        'SELECT pg_try_advisory_xact_lock($1) AS acquired',
+        [lockKey],
+      );
+      if (!lock.rows[0]?.acquired) return { acquired: false as const };
+      return { acquired: true as const, result: await operation(client) };
+    });
+  }
+
   async onModuleDestroy() {
     await this.pool?.end();
   }

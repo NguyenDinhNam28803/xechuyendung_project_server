@@ -1,23 +1,16 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
-import {
-  insertActivity,
-  type ActivityEntity,
-} from '../activity/activity.service.js';
-import {
-  type PageResult,
-  type PaginationQuery,
-  toPageResult,
-} from '../common/pagination.js';
-import { DatabaseService } from '../database/database.service.js';
+import { type Actor, insertActivity } from '../activity/activity.service.js';
+import { rethrowUniqueViolation } from '../common/database-errors.js';
+import { queryPage } from '../common/paged-query.js';
+import type { PageResult, PaginationQuery } from '../common/pagination.js';
+import { searchExpressions } from '../common/search.js';
+import { buildUpdateAssignments } from '../common/update-builder.js';
 import type {
   LegalResourceInput,
   LegalResourceType,
 } from '../content/content-validation.js';
+import { DatabaseService } from '../database/database.service.js';
 
 type LegalResourceRow = QueryResultRow & {
   id: string;
@@ -48,6 +41,8 @@ const selectedColumns = `
   created_at AS "createdAt", updated_at AS "updatedAt"
 `;
 
+const conflictMessage = 'Slug tài liệu đã tồn tại.';
+
 @Injectable()
 export class LegalResourcesService {
   constructor(private readonly database: DatabaseService) {}
@@ -70,40 +65,25 @@ export class LegalResourcesService {
     return result.rows;
   }
 
-  async findAll(
+  findAll(
     query: PaginationQuery,
     resourceType?: LegalResourceType,
   ): Promise<PageResult<LegalResourceRow>> {
-    const conditions: string[] = [];
-    const filterValues: string[] = [];
-    if (resourceType) {
-      filterValues.push(resourceType);
-      conditions.push(`resource_type = $${filterValues.length}`);
-    }
-    if (query.search) {
-      filterValues.push(`%${query.search}%`);
-      const parameter = `$${filterValues.length}`;
-      conditions.push(
-        `(title ILIKE ${parameter} OR slug ILIKE ${parameter} OR summary ILIKE ${parameter} OR content ILIKE ${parameter})`,
-      );
-    }
-    const filter = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const [result, count] = await Promise.all([
-      this.database.query<LegalResourceRow>(
-        `SELECT ${selectedColumns} FROM legal_resources ${filter}
-         ORDER BY updated_at DESC, id
-         LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
-        [...filterValues, query.limit, query.offset],
-      ),
-      this.database.query<{ total: string }>(
-        `SELECT COUNT(*)::text AS total FROM legal_resources ${filter}`,
-        filterValues,
-      ),
-    ]);
-    return toPageResult(result.rows, Number(count.rows[0].total), query);
+    return queryPage<LegalResourceRow>(
+      this.database,
+      {
+        columns: selectedColumns,
+        table: 'legal_resources',
+        conditions: resourceType ? ['resource_type = $1'] : [],
+        values: resourceType ? [resourceType] : [],
+        searchExpression: searchExpressions.legalResources,
+        orderBy: 'updated_at DESC, id',
+      },
+      query,
+    );
   }
 
-  async create(input: LegalResourceInput) {
+  async create(input: LegalResourceInput, actor: Actor) {
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<LegalResourceRow>(
@@ -111,38 +91,38 @@ export class LegalResourcesService {
             slug, resource_type, title, summary, content, source_url, is_published
           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
           RETURNING ${selectedColumns}`,
-          valuesForInsert(input),
+          [
+            input.slug,
+            input.resourceType,
+            input.title,
+            input.summary,
+            input.content,
+            input.sourceUrl,
+            input.isPublished,
+          ],
         );
         const resource = result.rows[0];
         await insertActivity(client, {
+          actor,
           action: 'CREATE',
-          entityType: input.resourceType as ActivityEntity,
+          entityType: resource.resourceType,
           entityId: resource.id,
           entityLabel: resource.title,
         });
         return resource;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async update(id: string, input: Partial<LegalResourceInput>) {
-    const entries = Object.entries(input) as [
-      keyof LegalResourceInput,
-      unknown,
-    ][];
-    const values = entries.map(([, value]) => value);
-    const assignments = entries.map(
-      ([key], index) => `${columns[key]} = $${index + 1}`,
-    );
+  async update(id: string, input: Partial<LegalResourceInput>, actor: Actor) {
+    const { assignments, values } = buildUpdateAssignments(input, columns);
     values.push(id);
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<LegalResourceRow>(
-          `UPDATE legal_resources
-           SET ${assignments.join(', ')}, updated_at = NOW()
+          `UPDATE legal_resources SET ${assignments}
            WHERE id = $${values.length} RETURNING ${selectedColumns}`,
           values,
         );
@@ -151,20 +131,20 @@ export class LegalResourcesService {
           throw new NotFoundException('Không tìm thấy tài liệu pháp lý.');
         }
         await insertActivity(client, {
+          actor,
           action: 'UPDATE',
-          entityType: resource.resourceType as ActivityEntity,
+          entityType: resource.resourceType,
           entityId: resource.id,
           entityLabel: resource.title,
         });
         return resource;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, actor: Actor) {
     await this.database.withTransaction(async (client) => {
       const result = await client.query<LegalResourceRow>(
         `DELETE FROM legal_resources WHERE id = $1
@@ -176,34 +156,12 @@ export class LegalResourcesService {
         throw new NotFoundException('Không tìm thấy tài liệu pháp lý.');
       }
       await insertActivity(client, {
+        actor,
         action: 'DELETE',
-        entityType: resource.resourceType as ActivityEntity,
+        entityType: resource.resourceType,
         entityId: resource.id,
         entityLabel: resource.title,
       });
     });
-  }
-}
-
-function valuesForInsert(input: LegalResourceInput) {
-  return [
-    input.slug,
-    input.resourceType,
-    input.title,
-    input.summary,
-    input.content,
-    input.sourceUrl,
-    input.isPublished,
-  ];
-}
-
-function throwIfConflict(error: unknown) {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === '23505'
-  ) {
-    throw new ConflictException('Slug tài liệu đã tồn tại.');
   }
 }

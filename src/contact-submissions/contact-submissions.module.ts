@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ActivityModule } from '../activity/activity.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { SecurityModule } from '../security/security.module.js';
 import {
@@ -9,11 +8,12 @@ import {
 import { ContactSubmissionsService } from './contact-submissions.service.js';
 
 @Module({
-  imports: [ActivityModule, AuthModule, SecurityModule],
+  imports: [AuthModule, SecurityModule],
   controllers: [
     PublicContactSubmissionsController,
     AdminContactSubmissionsController,
   ],
   providers: [ContactSubmissionsService],
+  exports: [ContactSubmissionsService],
 })
 export class ContactSubmissionsModule {}

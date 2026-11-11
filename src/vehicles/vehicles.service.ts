@@ -1,17 +1,13 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import type { QueryResultRow } from 'pg';
-import { insertActivity } from '../activity/activity.service.js';
-import {
-  type PageResult,
-  type PaginationQuery,
-  toPageResult,
-} from '../common/pagination.js';
-import { DatabaseService } from '../database/database.service.js';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { PoolClient, QueryResultRow } from 'pg';
+import { type Actor, insertActivity } from '../activity/activity.service.js';
+import { rethrowUniqueViolation } from '../common/database-errors.js';
+import { queryPage } from '../common/paged-query.js';
+import type { PageResult, PaginationQuery } from '../common/pagination.js';
+import { searchExpressions } from '../common/search.js';
+import { buildUpdateAssignments } from '../common/update-builder.js';
 import type { VehicleInput } from '../content/content-validation.js';
+import { DatabaseService } from '../database/database.service.js';
 
 type VehicleRow = QueryResultRow & {
   id: string;
@@ -46,11 +42,15 @@ const columns: Record<keyof VehicleInput, string> = {
   isPublished: 'is_published',
 };
 
+const jsonFields = ['images', 'highlights', 'knownDetails'] as const;
+
 const selectedColumns = `
   id, slug, name, make, category, description, artwork, images, badge,
   use_case AS "useCase", highlights, known_details AS "knownDetails",
   source_url AS "sourceUrl", is_published AS "isPublished"
 `;
+
+const conflictMessage = 'Slug xe đã tồn tại.';
 
 @Injectable()
 export class VehiclesService {
@@ -64,6 +64,21 @@ export class VehiclesService {
     return result.rows.map(toPublicVehicle);
   }
 
+  async findPublicPage(query: PaginationQuery) {
+    const page = await queryPage<VehicleRow>(
+      this.database,
+      {
+        columns: selectedColumns,
+        table: 'vehicles',
+        conditions: ['is_published = TRUE'],
+        searchExpression: searchExpressions.vehicles,
+        orderBy: 'created_at DESC, id',
+      },
+      query,
+    );
+    return { ...page, items: page.items.map(toPublicVehicle) };
+  }
+
   async findPublicBySlug(slug: string) {
     const result = await this.database.query<VehicleRow>(
       `SELECT ${selectedColumns} FROM vehicles
@@ -74,27 +89,20 @@ export class VehiclesService {
     return toPublicVehicle(result.rows[0]);
   }
 
-  async findAll(query: PaginationQuery): Promise<PageResult<VehicleRow>> {
-    const filter = query.search
-      ? 'WHERE name ILIKE $1 OR make ILIKE $1 OR category ILIKE $1 OR slug ILIKE $1'
-      : '';
-    const filterValues = query.search ? [`%${query.search}%`] : [];
-    const [result, count] = await Promise.all([
-      this.database.query<VehicleRow>(
-        `SELECT ${selectedColumns} FROM vehicles ${filter}
-         ORDER BY created_at DESC, id
-         LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
-        [...filterValues, query.limit, query.offset],
-      ),
-      this.database.query<{ total: string }>(
-        `SELECT COUNT(*)::text AS total FROM vehicles ${filter}`,
-        filterValues,
-      ),
-    ]);
-    return toPageResult(result.rows, Number(count.rows[0].total), query);
+  findAll(query: PaginationQuery): Promise<PageResult<VehicleRow>> {
+    return queryPage<VehicleRow>(
+      this.database,
+      {
+        columns: selectedColumns,
+        table: 'vehicles',
+        searchExpression: searchExpressions.vehicles,
+        orderBy: 'created_at DESC, id',
+      },
+      query,
+    );
   }
 
-  async create(input: VehicleInput) {
+  async create(input: VehicleInput, actor: Actor) {
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<VehicleRow>(
@@ -107,6 +115,7 @@ export class VehiclesService {
         );
         const vehicle = result.rows[0];
         await insertActivity(client, {
+          actor,
           action: 'CREATE',
           entityType: 'vehicle',
           entityId: vehicle.id,
@@ -115,29 +124,28 @@ export class VehiclesService {
         return vehicle;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async update(id: string, input: Partial<VehicleInput>) {
-    const entries = Object.entries(input) as [keyof VehicleInput, unknown][];
-    const values = entries.map(([key, value]) => jsonValue(key, value));
-    const assignments = entries.map(
-      ([key], index) =>
-        `${columns[key]} = $${index + 1}${isJsonField(key) ? '::jsonb' : ''}`,
+  async update(id: string, input: Partial<VehicleInput>, actor: Actor) {
+    const { assignments, values } = buildUpdateAssignments(
+      input,
+      columns,
+      jsonFields,
     );
     values.push(id);
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<VehicleRow>(
-          `UPDATE vehicles SET ${assignments.join(', ')}, updated_at = NOW()
+          `UPDATE vehicles SET ${assignments}
            WHERE id = $${values.length} RETURNING ${selectedColumns}`,
           values,
         );
         const vehicle = result.rows[0];
         if (!vehicle) throw new NotFoundException('Không tìm thấy xe.');
         await insertActivity(client, {
+          actor,
           action: 'UPDATE',
           entityType: 'vehicle',
           entityId: vehicle.id,
@@ -146,12 +154,11 @@ export class VehiclesService {
         return vehicle;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, actor: Actor) {
     await this.database.withTransaction(async (client) => {
       const result = await client.query<{ id: string; name: string }>(
         'DELETE FROM vehicles WHERE id = $1 RETURNING id, name',
@@ -160,6 +167,7 @@ export class VehiclesService {
       const vehicle = result.rows[0];
       if (!vehicle) throw new NotFoundException('Không tìm thấy xe.');
       await insertActivity(client, {
+        actor,
         action: 'DELETE',
         entityType: 'vehicle',
         entityId: vehicle.id,
@@ -169,8 +177,9 @@ export class VehiclesService {
   }
 }
 
-export async function insertVehicle(
-  client: import('pg').PoolClient,
+/** Dùng cho import nội dung mẫu: bỏ qua slug đã tồn tại, không ghi đè. */
+export async function insertVehicleIfMissing(
+  client: PoolClient,
   input: VehicleInput,
 ) {
   return client.query(
@@ -199,25 +208,6 @@ function valuesForInsert(input: VehicleInput) {
     input.sourceUrl,
     input.isPublished,
   ];
-}
-
-function jsonValue(key: keyof VehicleInput, value: unknown) {
-  return isJsonField(key) ? JSON.stringify(value) : value;
-}
-
-function isJsonField(key: keyof VehicleInput) {
-  return ['images', 'highlights', 'knownDetails'].includes(key);
-}
-
-function throwIfConflict(error: unknown) {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === '23505'
-  ) {
-    throw new ConflictException('Slug xe đã tồn tại.');
-  }
 }
 
 function toPublicVehicle(row: VehicleRow) {

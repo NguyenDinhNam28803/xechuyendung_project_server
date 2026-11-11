@@ -4,14 +4,19 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ParseUUIDPipe } from '@nestjs/common';
+import type { Actor } from '../activity/activity.service.js';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
-import { parsePaginationQuery } from '../common/pagination.js';
+import { CurrentActor } from '../auth/admin-principal.js';
+import {
+  parseOptionalPublicPage,
+  parsePaginationQuery,
+} from '../common/pagination.js';
 import { parseArticleInput } from '../content/content-validation.js';
 import { ArticlesService } from './articles.service.js';
 
@@ -20,8 +25,15 @@ export class ArticlesController {
   constructor(private readonly articles: ArticlesService) {}
 
   @Get()
-  findPublic() {
-    return this.articles.findPublic();
+  findPublic(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('q') search?: string,
+  ) {
+    const query = parseOptionalPublicPage(page, limit, search);
+    return query
+      ? this.articles.findPublicPage(query)
+      : this.articles.findPublic();
   }
 
   @Get(':slug')
@@ -45,18 +57,25 @@ export class AdminArticlesController {
   }
 
   @Post()
-  create(@Body() body: unknown) {
-    return this.articles.create(parseArticleInput(body));
+  create(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.articles.create(parseArticleInput(body), actor);
   }
 
   @Patch(':id')
-  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
-    return this.articles.update(id, parseArticleInput(body, true));
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentActor() actor: Actor,
+  ) {
+    return this.articles.update(id, parseArticleInput(body, true), actor);
   }
 
   @Delete(':id')
-  async remove(@Param('id', new ParseUUIDPipe()) id: string) {
-    await this.articles.remove(id);
+  async remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentActor() actor: Actor,
+  ) {
+    await this.articles.remove(id, actor);
     return { ok: true };
   }
 }
