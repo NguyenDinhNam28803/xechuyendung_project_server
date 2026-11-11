@@ -270,7 +270,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/LegalResource" }
+                items: { $ref: "#/components/schemas/PublicLegalResource" }
         "400": { $ref: "#/components/responses/BadRequest" }
   /api/v1/contact-submissions:
     post:
@@ -669,11 +669,24 @@ components:
     PublicVehicle:
       allOf:
         - $ref: "#/components/schemas/VehicleFields"
+      required: [slug, name, make, category, description, artwork, images, badge, useCase, highlights, knownDetails, sourceUrl]
       description: Published vehicle without id or isPublished.
     PublicArticle:
       allOf:
         - $ref: "#/components/schemas/ArticleFields"
+      required: [slug, category, title, summary, sections]
       description: Published article without id or isPublished.
+    PublicLegalResource:
+      type: object
+      required: [slug, resourceType, title, summary, content, sourceUrl, updatedAt]
+      properties:
+        slug: { type: string }
+        resourceType: { type: string, enum: [policy, regulation, legal_guide] }
+        title: { type: string }
+        summary: { type: string }
+        content: { type: string }
+        sourceUrl: { type: [string, "null"], format: uri }
+        updatedAt: { type: string, format: date-time }
     PublicVehiclePage:
       type: object
       required: [items, pagination]
@@ -692,9 +705,9 @@ components:
         pagination: { $ref: "#/components/schemas/PageInfo" }
     Vehicle:
       allOf:
-        - $ref: "#/components/schemas/VehicleFields"
+        - $ref: "#/components/schemas/VehicleInput"
         - type: object
-          required: [id]
+          required: [id, sourceUrl]
           properties:
             id: { type: string, format: uuid }
     VehicleFields:
@@ -743,7 +756,7 @@ components:
       description: One or more mutable vehicle fields; id is not accepted.
     Article:
       allOf:
-        - $ref: "#/components/schemas/ArticleFields"
+        - $ref: "#/components/schemas/ArticleInput"
         - type: object
           required: [id]
           properties:
@@ -775,11 +788,13 @@ components:
       description: One or more mutable article fields; id is not accepted.
     LegalResource:
       allOf:
-        - $ref: "#/components/schemas/LegalResourceFields"
+        - $ref: "#/components/schemas/LegalResourceInput"
         - type: object
-          required: [id]
+          required: [id, sourceUrl, createdAt, updatedAt]
           properties:
             id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     LegalResourceFields:
       type: object
       properties:
