@@ -94,7 +94,7 @@ export class AdminContactSubmissionsController {
       body === null ||
       Array.isArray(body) ||
       Object.keys(body).some(
-        (key) => !['page', 'limit', 'search'].includes(key),
+        (key) => !['page', 'limit', 'search', 'status'].includes(key),
       )
     ) {
       throw new BadRequestException('Bộ lọc yêu cầu liên hệ không hợp lệ.');
@@ -103,7 +103,9 @@ export class AdminContactSubmissionsController {
     if (
       (record.page !== undefined && typeof record.page !== 'number') ||
       (record.limit !== undefined && typeof record.limit !== 'number') ||
-      (record.search !== undefined && typeof record.search !== 'string')
+      (record.search !== undefined && typeof record.search !== 'string') ||
+      (record.status !== undefined &&
+        !allowedStatuses.has(record.status as ContactStatus))
     ) {
       throw new BadRequestException('Bộ lọc yêu cầu liên hệ không hợp lệ.');
     }
@@ -117,6 +119,7 @@ export class AdminContactSubmissionsController {
         typeof search === 'string' ? search : undefined,
         25,
       ),
+      record.status as ContactStatus | undefined,
     );
   }
 

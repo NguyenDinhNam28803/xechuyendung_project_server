@@ -127,9 +127,11 @@ mảng như cũ; có `page` hoặc `limit` thì trả `{ items, pagination }` (m
 | `DELETE`          | `/api/v1/admin/contact-submissions/:id`        | mọi     | Xóa yêu cầu và dữ liệu liên hệ  |
 
 Danh sách admin hỗ trợ `page` (từ 1), `limit` (mặc định 25, tối đa 100) và `q`
-(tối đa 100 ký tự). Kết quả dạng `{ items, pagination: { page, limit, total,
-totalPages } }`. Contact search nhận `{ "search": "..." }` trong body để dữ
-liệu cá nhân không xuất hiện trên URL/log truy cập.
+(tối đa 100 ký tự). Danh sách xe, bài viết và tài liệu pháp lý nhận thêm
+`published=true|false` để chỉ lấy nội dung công khai hoặc bản nháp. Kết quả
+dạng `{ items, pagination: { page, limit, total, totalPages } }`. Contact
+search nhận `{ "search": "...", "status": "new" }` trong body (cả hai tùy
+chọn) để dữ liệu cá nhân không xuất hiện trên URL/log truy cập.
 
 ### Rate limit
 

@@ -1,5 +1,22 @@
 import { BadRequestException } from '@nestjs/common';
-import { parsePaginationQuery, toPageResult } from './pagination.js';
+import {
+  parsePaginationQuery,
+  parsePublishedFilter,
+  toPageResult,
+} from './pagination.js';
+
+describe('published filter', () => {
+  it('maps true/false and treats missing or empty as no filter', () => {
+    expect(parsePublishedFilter('true')).toBe(true);
+    expect(parsePublishedFilter('false')).toBe(false);
+    expect(parsePublishedFilter(undefined)).toBeUndefined();
+    expect(parsePublishedFilter('')).toBeUndefined();
+  });
+
+  it.each(['1', 'yes', 'TRUE'])('rejects %s', (value) => {
+    expect(() => parsePublishedFilter(value)).toThrow(BadRequestException);
+  });
+});
 
 describe('pagination query', () => {
   it('uses bounded defaults and normalizes search text', () => {

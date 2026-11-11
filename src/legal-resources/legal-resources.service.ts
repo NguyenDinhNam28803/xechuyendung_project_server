@@ -68,14 +68,17 @@ export class LegalResourcesService {
   findAll(
     query: PaginationQuery,
     resourceType?: LegalResourceType,
+    isPublished?: boolean,
   ): Promise<PageResult<LegalResourceRow>> {
     return queryPage<LegalResourceRow>(
       this.database,
       {
         columns: selectedColumns,
         table: 'legal_resources',
-        conditions: resourceType ? ['resource_type = $1'] : [],
-        values: resourceType ? [resourceType] : [],
+        filters: [
+          { column: 'resource_type', value: resourceType },
+          { column: 'is_published', value: isPublished },
+        ],
         searchExpression: searchExpressions.legalResources,
         orderBy: 'updated_at DESC, id',
       },

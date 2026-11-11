@@ -45,6 +45,17 @@ export function parsePaginationQuery(
 }
 
 /**
+ * Bộ lọc trạng thái xuất bản cho danh sách quản trị: `published=true` chỉ lấy
+ * nội dung công khai, `published=false` chỉ lấy bản nháp, bỏ trống lấy tất cả.
+ */
+export function parsePublishedFilter(value?: string): boolean | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new BadRequestException('Tham số "published" không hợp lệ.');
+}
+
+/**
  * API công khai giữ tương thích ngược: không truyền `page`/`limit` thì trả về
  * mảng như cũ; có một trong hai tham số thì trả về dạng phân trang
  * `{ items, pagination }` (mặc định 12 mục mỗi trang).

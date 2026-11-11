@@ -14,7 +14,10 @@ import {
 import type { Actor } from '../activity/activity.service.js';
 import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
 import { CurrentActor } from '../auth/admin-principal.js';
-import { parsePaginationQuery } from '../common/pagination.js';
+import {
+  parsePaginationQuery,
+  parsePublishedFilter,
+} from '../common/pagination.js';
 import {
   parseLegalResourceInput,
   type LegalResourceType,
@@ -53,6 +56,7 @@ export class AdminLegalResourcesController {
     @Query('limit') limit?: string,
     @Query('q') search?: string,
     @Query('type') type?: string,
+    @Query('published') published?: string,
   ) {
     if (type !== undefined && !resourceTypes.has(type as LegalResourceType)) {
       throw new BadRequestException('Loại tài liệu không hợp lệ.');
@@ -60,6 +64,7 @@ export class AdminLegalResourcesController {
     return this.legalResources.findAll(
       parsePaginationQuery(page, limit, search),
       type as LegalResourceType | undefined,
+      parsePublishedFilter(published),
     );
   }
 

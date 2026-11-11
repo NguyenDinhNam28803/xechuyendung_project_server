@@ -57,10 +57,14 @@ export class ContactSubmissionsService {
     return { ok: true, id: result.rows[0].id };
   }
 
-  findRecent(query: PaginationQuery): Promise<PageResult<ContactRow>> {
+  findRecent(
+    query: PaginationQuery,
+    status?: ContactStatus,
+  ): Promise<PageResult<ContactRow>> {
     return queryPage<ContactRow>(
       this.database,
       {
+        filters: [{ column: 'status', value: status }],
         columns: `id, name, phone, category, location, message,
                   vehicle_slug AS "vehicleSlug", status,
                   consent_text AS "consentText", consent_at AS "consentAt",

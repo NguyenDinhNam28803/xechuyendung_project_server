@@ -306,6 +306,7 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
+        - $ref: "#/components/parameters/Published"
       responses:
         "200":
           description: A page of vehicles.
@@ -362,6 +363,7 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
+        - $ref: "#/components/parameters/Published"
       responses:
         "200":
           description: A page of articles.
@@ -445,6 +447,7 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
+        - $ref: "#/components/parameters/Published"
         - name: type
           in: query
           schema:
@@ -617,6 +620,11 @@ components:
       in: query
       description: Case-insensitive substring; "%" and "_" are matched literally.
       schema: { type: string, maxLength: 100 }
+    Published:
+      name: published
+      in: query
+      description: true = only published items, false = only drafts, omitted = all.
+      schema: { type: string, enum: ["true", "false"] }
   schemas:
     AdminRole:
       type: string
@@ -826,6 +834,11 @@ components:
         page: { type: integer, minimum: 1, default: 1 }
         limit: { type: integer, minimum: 1, maximum: 100, default: 25 }
         search: { type: string, maxLength: 100 }
+        status:
+          type: string
+          enum: [new, in_progress, contacted, closed, spam]
+          description: Only return submissions with this status.
+      additionalProperties: false
     ContactSubmissionInput:
       type: object
       required: [name, phone, category, consent]

@@ -16,6 +16,7 @@ import { CurrentActor } from '../auth/admin-principal.js';
 import {
   parseOptionalPublicPage,
   parsePaginationQuery,
+  parsePublishedFilter,
 } from '../common/pagination.js';
 import { parseVehicleInput } from '../content/content-validation.js';
 import { VehiclesService } from './vehicles.service.js';
@@ -52,8 +53,12 @@ export class AdminVehiclesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('q') search?: string,
+    @Query('published') published?: string,
   ) {
-    return this.vehicles.findAll(parsePaginationQuery(page, limit, search));
+    return this.vehicles.findAll(
+      parsePaginationQuery(page, limit, search),
+      parsePublishedFilter(published),
+    );
   }
 
   @Post()

@@ -75,12 +75,16 @@ export class ArticlesService {
     return toPublicArticle(result.rows[0]);
   }
 
-  findAll(query: PaginationQuery): Promise<PageResult<ArticleRow>> {
+  findAll(
+    query: PaginationQuery,
+    isPublished?: boolean,
+  ): Promise<PageResult<ArticleRow>> {
     return queryPage<ArticleRow>(
       this.database,
       {
         columns: selectedColumns,
         table: 'articles',
+        filters: [{ column: 'is_published', value: isPublished }],
         searchExpression: searchExpressions.articles,
         orderBy: 'created_at DESC, id',
       },

@@ -15,6 +15,11 @@ export type PagedQueryOptions = {
   /** Điều kiện bổ sung dùng tham số $1..$n tương ứng với `values`. */
   conditions?: string[];
   values?: unknown[];
+  /**
+   * Lọc bằng so sánh bằng; mục có `value` undefined bị bỏ qua. `column` luôn
+   * là hằng số trong mã nguồn, giá trị luôn đi qua tham số.
+   */
+  filters?: { column: string; value: unknown }[];
   /** Biểu thức tìm kiếm trong common/search.ts; bỏ qua khi query.search rỗng. */
   searchExpression?: string;
   orderBy: string;
@@ -32,6 +37,11 @@ export async function queryPage<Row extends QueryResultRow>(
 ): Promise<PageResult<Row>> {
   const conditions = [...(options.conditions ?? [])];
   const values = [...(options.values ?? [])];
+  for (const filter of options.filters ?? []) {
+    if (filter.value === undefined) continue;
+    values.push(filter.value);
+    conditions.push(`${filter.column} = $${values.length}`);
+  }
   if (query.search && options.searchExpression) {
     values.push(containsPattern(query.search));
     conditions.push(`${options.searchExpression} ILIKE $${values.length}`);

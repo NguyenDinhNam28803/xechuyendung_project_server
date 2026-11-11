@@ -16,6 +16,7 @@ import { CurrentActor } from '../auth/admin-principal.js';
 import {
   parseOptionalPublicPage,
   parsePaginationQuery,
+  parsePublishedFilter,
 } from '../common/pagination.js';
 import { parseArticleInput } from '../content/content-validation.js';
 import { ArticlesService } from './articles.service.js';
@@ -52,8 +53,12 @@ export class AdminArticlesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('q') search?: string,
+    @Query('published') published?: string,
   ) {
-    return this.articles.findAll(parsePaginationQuery(page, limit, search));
+    return this.articles.findAll(
+      parsePaginationQuery(page, limit, search),
+      parsePublishedFilter(published),
+    );
   }
 
   @Post()

@@ -89,12 +89,16 @@ export class VehiclesService {
     return toPublicVehicle(result.rows[0]);
   }
 
-  findAll(query: PaginationQuery): Promise<PageResult<VehicleRow>> {
+  findAll(
+    query: PaginationQuery,
+    isPublished?: boolean,
+  ): Promise<PageResult<VehicleRow>> {
     return queryPage<VehicleRow>(
       this.database,
       {
         columns: selectedColumns,
         table: 'vehicles',
+        filters: [{ column: 'is_published', value: isPublished }],
         searchExpression: searchExpressions.vehicles,
         orderBy: 'created_at DESC, id',
       },
