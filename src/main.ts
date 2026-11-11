@@ -50,7 +50,7 @@ async function bootstrap() {
   bootstrapLogger.log(`URL: ${await app.getUrl()}`);
   bootstrapLogger.log(`Environment: ${process.env.NODE_ENV ?? 'not set'}`);
   bootstrapLogger.log(
-    'API: /api/v1/vehicles, /api/v1/articles, /api/v1/legal-resources, /api/v1/admin',
+    'API: /api/v1 (public), /api/v1/admin (authenticated), /health/live, /health/ready',
   );
 }
 

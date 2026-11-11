@@ -44,6 +44,20 @@ export function parsePaginationQuery(
   };
 }
 
+/**
+ * API công khai giữ tương thích ngược: không truyền `page`/`limit` thì trả về
+ * mảng như cũ; có một trong hai tham số thì trả về dạng phân trang
+ * `{ items, pagination }` (mặc định 12 mục mỗi trang).
+ */
+export function parseOptionalPublicPage(
+  pageValue?: string,
+  limitValue?: string,
+  searchValue?: string,
+): PaginationQuery | undefined {
+  if (pageValue === undefined && limitValue === undefined) return undefined;
+  return parsePaginationQuery(pageValue, limitValue, searchValue, 12);
+}
+
 export function toPageResult<T>(
   items: T[],
   total: number,

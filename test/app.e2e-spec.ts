@@ -16,11 +16,8 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('does not expose the scaffold root route', () => {
+    return request(app.getHttpServer()).get('/').expect(404);
   });
 
   it('exposes an independent liveness check', () => {
@@ -56,6 +53,27 @@ describe('AppController (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/v1/admin/contact-submissions/search')
       .send({ search: 'phone' })
+      .expect(401);
+  });
+
+  it('account, user management and logout require authentication', async () => {
+    await request(app.getHttpServer()).get('/api/v1/auth/me').expect(401);
+    await request(app.getHttpServer()).post('/api/v1/auth/logout').expect(401);
+    await request(app.getHttpServer()).get('/api/v1/admin/users').expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/account/password')
+      .send({})
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/import-defaults')
+      .send({ vehicles: [], articles: [] })
+      .expect(401);
+  });
+
+  it('rejects malformed bearer tokens before touching the database', () => {
+    return request(app.getHttpServer())
+      .get('/api/v1/admin/vehicles')
+      .set('Authorization', 'Bearer not a token')
       .expect(401);
   });
 

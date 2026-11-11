@@ -1,17 +1,13 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import type { QueryResultRow } from 'pg';
-import { insertActivity } from '../activity/activity.service.js';
-import {
-  type PageResult,
-  type PaginationQuery,
-  toPageResult,
-} from '../common/pagination.js';
-import { DatabaseService } from '../database/database.service.js';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { PoolClient, QueryResultRow } from 'pg';
+import { type Actor, insertActivity } from '../activity/activity.service.js';
+import { rethrowUniqueViolation } from '../common/database-errors.js';
+import { queryPage } from '../common/paged-query.js';
+import type { PageResult, PaginationQuery } from '../common/pagination.js';
+import { searchExpressions } from '../common/search.js';
+import { buildUpdateAssignments } from '../common/update-builder.js';
 import type { ArticleInput } from '../content/content-validation.js';
+import { DatabaseService } from '../database/database.service.js';
 
 type ArticleRow = QueryResultRow & {
   id: string;
@@ -32,10 +28,14 @@ const columns: Record<keyof ArticleInput, string> = {
   isPublished: 'is_published',
 };
 
+const jsonFields = ['sections'] as const;
+
 const selectedColumns = `
   id, slug, category, title, summary, sections,
   is_published AS "isPublished"
 `;
+
+const conflictMessage = 'Slug bài viết đã tồn tại.';
 
 @Injectable()
 export class ArticlesService {
@@ -49,6 +49,21 @@ export class ArticlesService {
     return result.rows.map(toPublicArticle);
   }
 
+  async findPublicPage(query: PaginationQuery) {
+    const page = await queryPage<ArticleRow>(
+      this.database,
+      {
+        columns: selectedColumns,
+        table: 'articles',
+        conditions: ['is_published = TRUE'],
+        searchExpression: searchExpressions.articles,
+        orderBy: 'created_at DESC, id',
+      },
+      query,
+    );
+    return { ...page, items: page.items.map(toPublicArticle) };
+  }
+
   async findPublicBySlug(slug: string) {
     const result = await this.database.query<ArticleRow>(
       `SELECT ${selectedColumns} FROM articles
@@ -60,27 +75,20 @@ export class ArticlesService {
     return toPublicArticle(result.rows[0]);
   }
 
-  async findAll(query: PaginationQuery): Promise<PageResult<ArticleRow>> {
-    const filter = query.search
-      ? 'WHERE title ILIKE $1 OR category ILIKE $1 OR slug ILIKE $1'
-      : '';
-    const filterValues = query.search ? [`%${query.search}%`] : [];
-    const [result, count] = await Promise.all([
-      this.database.query<ArticleRow>(
-        `SELECT ${selectedColumns} FROM articles ${filter}
-         ORDER BY created_at DESC, id
-         LIMIT $${filterValues.length + 1} OFFSET $${filterValues.length + 2}`,
-        [...filterValues, query.limit, query.offset],
-      ),
-      this.database.query<{ total: string }>(
-        `SELECT COUNT(*)::text AS total FROM articles ${filter}`,
-        filterValues,
-      ),
-    ]);
-    return toPageResult(result.rows, Number(count.rows[0].total), query);
+  findAll(query: PaginationQuery): Promise<PageResult<ArticleRow>> {
+    return queryPage<ArticleRow>(
+      this.database,
+      {
+        columns: selectedColumns,
+        table: 'articles',
+        searchExpression: searchExpressions.articles,
+        orderBy: 'created_at DESC, id',
+      },
+      query,
+    );
   }
 
-  async create(input: ArticleInput) {
+  async create(input: ArticleInput, actor: Actor) {
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<ArticleRow>(
@@ -92,6 +100,7 @@ export class ArticlesService {
         );
         const article = result.rows[0];
         await insertActivity(client, {
+          actor,
           action: 'CREATE',
           entityType: 'article',
           entityId: article.id,
@@ -100,31 +109,28 @@ export class ArticlesService {
         return article;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async update(id: string, input: Partial<ArticleInput>) {
-    const entries = Object.entries(input) as [keyof ArticleInput, unknown][];
-    const values = entries.map(([key, value]) =>
-      key === 'sections' ? JSON.stringify(value) : value,
-    );
-    const assignments = entries.map(
-      ([key], index) =>
-        `${columns[key]} = $${index + 1}${key === 'sections' ? '::jsonb' : ''}`,
+  async update(id: string, input: Partial<ArticleInput>, actor: Actor) {
+    const { assignments, values } = buildUpdateAssignments(
+      input,
+      columns,
+      jsonFields,
     );
     values.push(id);
     try {
       return await this.database.withTransaction(async (client) => {
         const result = await client.query<ArticleRow>(
-          `UPDATE articles SET ${assignments.join(', ')}, updated_at = NOW()
+          `UPDATE articles SET ${assignments}
            WHERE id = $${values.length} RETURNING ${selectedColumns}`,
           values,
         );
         const article = result.rows[0];
         if (!article) throw new NotFoundException('Không tìm thấy bài viết.');
         await insertActivity(client, {
+          actor,
           action: 'UPDATE',
           entityType: 'article',
           entityId: article.id,
@@ -133,12 +139,11 @@ export class ArticlesService {
         return article;
       });
     } catch (error) {
-      throwIfConflict(error);
-      throw error;
+      rethrowUniqueViolation(error, conflictMessage);
     }
   }
 
-  async remove(id: string) {
+  async remove(id: string, actor: Actor) {
     await this.database.withTransaction(async (client) => {
       const result = await client.query<{ id: string; title: string }>(
         'DELETE FROM articles WHERE id = $1 RETURNING id, title',
@@ -147,6 +152,7 @@ export class ArticlesService {
       const article = result.rows[0];
       if (!article) throw new NotFoundException('Không tìm thấy bài viết.');
       await insertActivity(client, {
+        actor,
         action: 'DELETE',
         entityType: 'article',
         entityId: article.id,
@@ -156,8 +162,9 @@ export class ArticlesService {
   }
 }
 
-export async function insertArticle(
-  client: import('pg').PoolClient,
+/** Dùng cho import nội dung mẫu: bỏ qua slug đã tồn tại, không ghi đè. */
+export async function insertArticleIfMissing(
+  client: PoolClient,
   input: ArticleInput,
 ) {
   return client.query(
@@ -178,17 +185,6 @@ function valuesForInsert(input: ArticleInput) {
     JSON.stringify(input.sections),
     input.isPublished,
   ];
-}
-
-function throwIfConflict(error: unknown) {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === '23505'
-  ) {
-    throw new ConflictException('Slug bài viết đã tồn tại.');
-  }
 }
 
 function toPublicArticle(row: ArticleRow) {
