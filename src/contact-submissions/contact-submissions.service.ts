@@ -14,6 +14,15 @@ import type { ContactSubmissionInput } from './contact-submissions.validation.js
 export type ContactStatus =
   'new' | 'in_progress' | 'contacted' | 'closed' | 'spam';
 
+/** Nhãn hiển thị trong nhật ký hoạt động (khớp contactStatusLabels phía client). */
+const contactStatusLabels: Record<ContactStatus, string> = {
+  new: 'Mới',
+  in_progress: 'Đang xử lý',
+  contacted: 'Đã liên hệ',
+  closed: 'Hoàn tất',
+  spam: 'Spam',
+};
+
 type ContactRow = QueryResultRow & {
   id: string;
   name: string;
@@ -94,7 +103,7 @@ export class ContactSubmissionsService {
         action: 'UPDATE',
         entityType: 'contact_submission',
         entityId: submission.id,
-        entityLabel: `Cập nhật trạng thái yêu cầu liên hệ thành ${status}`,
+        entityLabel: `Cập nhật trạng thái yêu cầu liên hệ thành “${contactStatusLabels[status]}”`,
       });
       return { id: submission.id, status: submission.status };
     });
