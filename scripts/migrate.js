@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +15,15 @@ if (!connectionString) {
 
 const pool = new Pool({
   connectionString,
+  // Giống src/database/ssl-options.ts: DATABASE_SSL_CA cho CA riêng (Supabase).
   ssl:
     process.env.DATABASE_SSL === 'true'
-      ? { rejectUnauthorized: true }
+      ? {
+          rejectUnauthorized: true,
+          ...(process.env.DATABASE_SSL_CA?.trim()
+            ? { ca: readFileSync(process.env.DATABASE_SSL_CA.trim(), 'utf8') }
+            : {}),
+        }
       : undefined,
 });
 

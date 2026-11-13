@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
+import { databaseSslOptions } from './ssl-options.js';
 
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
@@ -22,10 +23,7 @@ export class DatabaseService implements OnModuleDestroy {
         connectionTimeoutMillis: 5_000,
         idleTimeoutMillis: 30_000,
         query_timeout: 10_000,
-        ssl:
-          process.env.DATABASE_SSL === 'true'
-            ? { rejectUnauthorized: true }
-            : undefined,
+        ssl: databaseSslOptions(),
       });
       this.pool.on('error', (error: Error) => {
         console.error('Unexpected PostgreSQL pool error.', error);

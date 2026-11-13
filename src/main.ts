@@ -43,7 +43,10 @@ async function bootstrap() {
     next();
   });
   app.enableShutdownHooks();
-  await app.listen(process.env.PORT ?? 4000);
+  // HOST=127.0.0.1 trên VPS: API chỉ nhận kết nối từ Next cùng máy, không mở ra Internet.
+  const host = process.env.HOST?.trim();
+  if (host) await app.listen(process.env.PORT ?? 4000, host);
+  else await app.listen(process.env.PORT ?? 4000);
 
   const bootstrapLogger = new Logger('Bootstrap');
   bootstrapLogger.log('Xe Chuyên Dụng API is running.');
