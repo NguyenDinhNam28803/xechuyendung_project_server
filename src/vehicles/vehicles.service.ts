@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { type Actor, insertActivity } from '../activity/activity.service.js';
+import {
+  type BulkRequest,
+  runBulkContentAction,
+} from '../common/bulk-content.js';
 import { rethrowUniqueViolation } from '../common/database-errors.js';
 import { queryPage } from '../common/paged-query.js';
 import type { PageResult, PaginationQuery } from '../common/pagination.js';
@@ -24,6 +28,8 @@ type VehicleRow = QueryResultRow & {
   knownDetails: { label: string; value: string }[];
   sourceUrl: string | null;
   isPublished: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 const columns: Record<keyof VehicleInput, string> = {
@@ -47,8 +53,20 @@ const jsonFields = ['images', 'highlights', 'knownDetails'] as const;
 const selectedColumns = `
   id, slug, name, make, category, description, artwork, images, badge,
   use_case AS "useCase", highlights, known_details AS "knownDetails",
-  source_url AS "sourceUrl", is_published AS "isPublished"
+  source_url AS "sourceUrl", is_published AS "isPublished",
+  created_at AS "createdAt", updated_at AS "updatedAt"
 `;
+
+/** Cột được phép sắp xếp trong danh sách quản trị (?sort=field:asc|desc). */
+export const vehicleSortColumns = {
+  name: 'name',
+  make: 'make',
+  category: 'category',
+  isPublished: 'is_published',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+};
+export const vehicleDefaultOrder = 'created_at DESC, id';
 
 const conflictMessage = 'Slug xe đã tồn tại.';
 
@@ -92,6 +110,7 @@ export class VehiclesService {
   findAll(
     query: PaginationQuery,
     isPublished?: boolean,
+    orderBy = vehicleDefaultOrder,
   ): Promise<PageResult<VehicleRow>> {
     return queryPage<VehicleRow>(
       this.database,
@@ -100,7 +119,7 @@ export class VehiclesService {
         table: 'vehicles',
         filters: [{ column: 'is_published', value: isPublished }],
         searchExpression: searchExpressions.vehicles,
-        orderBy: 'created_at DESC, id',
+        orderBy,
       },
       query,
     );
@@ -162,6 +181,15 @@ export class VehiclesService {
     }
   }
 
+  bulk(request: BulkRequest, actor: Actor) {
+    return runBulkContentAction(
+      this.database,
+      { table: 'vehicles', labelColumn: 'name', entityTypeSql: "'vehicle'" },
+      request,
+      actor,
+    );
+  }
+
   async remove(id: string, actor: Actor) {
     await this.database.withTransaction(async (client) => {
       const result = await client.query<{ id: string; name: string }>(
@@ -215,8 +243,10 @@ function valuesForInsert(input: VehicleInput) {
 }
 
 function toPublicVehicle(row: VehicleRow) {
-  const { id, isPublished, ...vehicle } = row;
+  const { id, isPublished, createdAt, updatedAt, ...vehicle } = row;
   void id;
   void isPublished;
+  void createdAt;
+  void updatedAt;
   return vehicle;
 }

@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
+import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { ActivityModule } from './activity/activity.module.js';
 import { AdminUsersModule } from './admin-users/admin-users.module.js';
 import { ArticlesModule } from './articles/articles.module.js';
@@ -10,9 +12,12 @@ import { HealthModule } from './health/health.module.js';
 import { LegalResourcesModule } from './legal-resources/legal-resources.module.js';
 import { MaintenanceModule } from './maintenance/maintenance.module.js';
 import { SecurityModule } from './security/security.module.js';
+import { StatsModule } from './stats/stats.module.js';
+import { VehicleCategoriesModule } from './vehicle-categories/vehicle-categories.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 
 @Module({
+  providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
   imports: [
     DatabaseModule,
     SecurityModule,
@@ -21,11 +26,13 @@ import { VehiclesModule } from './vehicles/vehicles.module.js';
     AdminUsersModule,
     ActivityModule,
     VehiclesModule,
+    VehicleCategoriesModule,
     ArticlesModule,
     LegalResourcesModule,
     ContactSubmissionsModule,
     ContentImportModule,
     MaintenanceModule,
+    StatsModule,
   ],
 })
 export class AppModule {}

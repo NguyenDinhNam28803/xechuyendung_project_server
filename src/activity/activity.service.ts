@@ -3,20 +3,40 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import { queryPage } from '../common/paged-query.js';
 import type { PageResult, PaginationQuery } from '../common/pagination.js';
 import { searchExpressions } from '../common/search.js';
+import { businessTimeZone } from '../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 
-export type ActivityAction =
-  'CREATE' | 'UPDATE' | 'DELETE' | 'IMPORT' | 'LOGIN' | 'LOGOUT';
+export const activityActionValues = [
+  'CREATE',
+  'UPDATE',
+  'DELETE',
+  'IMPORT',
+  'LOGIN',
+  'LOGOUT',
+] as const;
+export type ActivityAction = (typeof activityActionValues)[number];
 
-export type ActivityEntity =
-  | 'vehicle'
-  | 'article'
-  | 'policy'
-  | 'regulation'
-  | 'legal_guide'
-  | 'contact_submission'
-  | 'admin_user'
-  | 'system';
+/** Phải khớp CHECK activity_logs_entity_type_check (migration 007). */
+export const activityEntityValues = [
+  'vehicle',
+  'vehicle_category',
+  'article',
+  'policy',
+  'regulation',
+  'legal_guide',
+  'contact_submission',
+  'admin_user',
+  'system',
+] as const;
+export type ActivityEntity = (typeof activityEntityValues)[number];
+
+export type ActivityFilters = {
+  action?: ActivityAction;
+  entityType?: ActivityEntity;
+  /** YYYY-MM-DD theo giờ Việt Nam, bao gồm. */
+  from?: string;
+  to?: string;
+};
 
 /** Người thực hiện thao tác: tài khoản quản trị hoặc tác vụ hệ thống. */
 export type Actor = {
@@ -49,10 +69,35 @@ type ActivityRow = QueryResultRow & {
 export class ActivityService {
   constructor(private readonly database: DatabaseService) {}
 
-  findRecent(query: PaginationQuery): Promise<PageResult<ActivityRow>> {
+  findRecent(
+    query: PaginationQuery,
+    filters: ActivityFilters = {},
+  ): Promise<PageResult<ActivityRow>> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    // Múi giờ là hằng số trong mã nguồn; ngày luôn đi qua tham số.
+    const zone = `'${businessTimeZone}'`;
+    if (filters.from) {
+      values.push(filters.from);
+      conditions.push(
+        `created_at >= ($${values.length}::date::timestamp AT TIME ZONE ${zone})`,
+      );
+    }
+    if (filters.to) {
+      values.push(filters.to);
+      conditions.push(
+        `created_at < (($${values.length}::date + 1)::timestamp AT TIME ZONE ${zone})`,
+      );
+    }
     return queryPage<ActivityRow>(
       this.database,
       {
+        conditions,
+        values,
+        filters: [
+          { column: 'action', value: filters.action },
+          { column: 'entity_type', value: filters.entityType },
+        ],
         columns: `id, actor, actor_id AS "actorId", action,
                   entity_type AS "entityType", entity_id AS "entityId",
                   entity_label AS "entityLabel", created_at AS "createdAt"`,

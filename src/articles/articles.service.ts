@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { type Actor, insertActivity } from '../activity/activity.service.js';
+import {
+  type BulkRequest,
+  runBulkContentAction,
+} from '../common/bulk-content.js';
 import { rethrowUniqueViolation } from '../common/database-errors.js';
 import { queryPage } from '../common/paged-query.js';
 import type { PageResult, PaginationQuery } from '../common/pagination.js';
@@ -17,6 +21,8 @@ type ArticleRow = QueryResultRow & {
   summary: string;
   sections: { heading: string; paragraphs: string[] }[];
   isPublished: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 const columns: Record<keyof ArticleInput, string> = {
@@ -32,8 +38,19 @@ const jsonFields = ['sections'] as const;
 
 const selectedColumns = `
   id, slug, category, title, summary, sections,
-  is_published AS "isPublished"
+  is_published AS "isPublished",
+  created_at AS "createdAt", updated_at AS "updatedAt"
 `;
+
+/** Cột được phép sắp xếp trong danh sách quản trị (?sort=field:asc|desc). */
+export const articleSortColumns = {
+  title: 'title',
+  category: 'category',
+  isPublished: 'is_published',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+};
+export const articleDefaultOrder = 'created_at DESC, id';
 
 const conflictMessage = 'Slug bài viết đã tồn tại.';
 
@@ -78,6 +95,7 @@ export class ArticlesService {
   findAll(
     query: PaginationQuery,
     isPublished?: boolean,
+    orderBy = articleDefaultOrder,
   ): Promise<PageResult<ArticleRow>> {
     return queryPage<ArticleRow>(
       this.database,
@@ -86,7 +104,7 @@ export class ArticlesService {
         table: 'articles',
         filters: [{ column: 'is_published', value: isPublished }],
         searchExpression: searchExpressions.articles,
-        orderBy: 'created_at DESC, id',
+        orderBy,
       },
       query,
     );
@@ -147,6 +165,15 @@ export class ArticlesService {
     }
   }
 
+  bulk(request: BulkRequest, actor: Actor) {
+    return runBulkContentAction(
+      this.database,
+      { table: 'articles', labelColumn: 'title', entityTypeSql: "'article'" },
+      request,
+      actor,
+    );
+  }
+
   async remove(id: string, actor: Actor) {
     await this.database.withTransaction(async (client) => {
       const result = await client.query<{ id: string; title: string }>(
@@ -192,8 +219,10 @@ function valuesForInsert(input: ArticleInput) {
 }
 
 function toPublicArticle(row: ArticleRow) {
-  const { id, isPublished, ...article } = row;
+  const { id, isPublished, createdAt, updatedAt, ...article } = row;
   void id;
   void isPublished;
+  void createdAt;
+  void updatedAt;
   return article;
 }

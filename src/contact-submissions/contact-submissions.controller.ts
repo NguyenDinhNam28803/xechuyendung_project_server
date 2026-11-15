@@ -16,7 +16,10 @@ import { AdminAuthGuard } from '../auth/admin-auth.guard.js';
 import { CurrentActor } from '../auth/admin-principal.js';
 import { parsePaginationQuery } from '../common/pagination.js';
 import { RateLimit, RateLimitGuard } from '../security/rate-limit.guard.js';
+import { parseSort } from '../common/sorting.js';
 import {
+  contactDefaultOrder,
+  contactSortColumns,
   ContactSubmissionsService,
   type ContactStatus,
 } from './contact-submissions.service.js';
@@ -94,7 +97,7 @@ export class AdminContactSubmissionsController {
       body === null ||
       Array.isArray(body) ||
       Object.keys(body).some(
-        (key) => !['page', 'limit', 'search', 'status'].includes(key),
+        (key) => !['page', 'limit', 'search', 'status', 'sort'].includes(key),
       )
     ) {
       throw new BadRequestException('Bộ lọc yêu cầu liên hệ không hợp lệ.');
@@ -104,6 +107,7 @@ export class AdminContactSubmissionsController {
       (record.page !== undefined && typeof record.page !== 'number') ||
       (record.limit !== undefined && typeof record.limit !== 'number') ||
       (record.search !== undefined && typeof record.search !== 'string') ||
+      (record.sort !== undefined && typeof record.sort !== 'string') ||
       (record.status !== undefined &&
         !allowedStatuses.has(record.status as ContactStatus))
     ) {
@@ -120,6 +124,11 @@ export class AdminContactSubmissionsController {
         25,
       ),
       record.status as ContactStatus | undefined,
+      parseSort(
+        typeof record.sort === 'string' ? record.sort : undefined,
+        contactSortColumns,
+        contactDefaultOrder,
+      ),
     );
   }
 

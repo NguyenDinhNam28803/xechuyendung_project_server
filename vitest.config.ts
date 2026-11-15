@@ -8,5 +8,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // Unit test không được chạm database thật kể cả khi shell có DATABASE_URL.
+    env: { DATABASE_URL: '' },
   },
 });

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -22,7 +23,13 @@ import {
   parseLegalResourceInput,
   type LegalResourceType,
 } from '../content/content-validation.js';
-import { LegalResourcesService } from './legal-resources.service.js';
+import { parseBulkRequest } from '../common/bulk-content.js';
+import { parseSort } from '../common/sorting.js';
+import {
+  legalResourceDefaultOrder,
+  legalResourceSortColumns,
+  LegalResourcesService,
+} from './legal-resources.service.js';
 
 const resourceTypes = new Set<LegalResourceType>([
   'policy',
@@ -57,6 +64,7 @@ export class AdminLegalResourcesController {
     @Query('q') search?: string,
     @Query('type') type?: string,
     @Query('published') published?: string,
+    @Query('sort') sort?: string,
   ) {
     if (type !== undefined && !resourceTypes.has(type as LegalResourceType)) {
       throw new BadRequestException('Loại tài liệu không hợp lệ.');
@@ -65,7 +73,15 @@ export class AdminLegalResourcesController {
       parsePaginationQuery(page, limit, search),
       type as LegalResourceType | undefined,
       parsePublishedFilter(published),
+      parseSort(sort, legalResourceSortColumns, legalResourceDefaultOrder),
     );
+  }
+
+  /** Xuất bản / chuyển nháp / xóa nhiều tài liệu: { ids, action }. */
+  @Post('bulk')
+  @HttpCode(200)
+  bulk(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.legalResources.bulk(parseBulkRequest(body), actor);
   }
 
   @Post()

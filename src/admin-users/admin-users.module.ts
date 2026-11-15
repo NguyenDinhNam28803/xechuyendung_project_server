@@ -4,11 +4,14 @@ import {
   AdminAccountController,
   AdminUsersController,
 } from './admin-users.controller.js';
-import { AdminUsersService } from './admin-users.service.js';
+import {
+  AdminSessionsService,
+  AdminUsersService,
+} from './admin-users.service.js';
 
 @Module({
   imports: [AuthModule],
   controllers: [AdminUsersController, AdminAccountController],
-  providers: [AdminUsersService],
+  providers: [AdminUsersService, AdminSessionsService],
 })
 export class AdminUsersModule {}
