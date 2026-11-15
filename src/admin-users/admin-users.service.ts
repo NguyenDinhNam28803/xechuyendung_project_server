@@ -38,6 +38,16 @@ const selectedColumns = `
   created_at AS "createdAt", updated_at AS "updatedAt"
 `;
 
+export const adminUserSortColumns = {
+  username: 'username',
+  displayName: 'display_name',
+  role: 'role',
+  isActive: 'is_active',
+  lastLoginAt: 'last_login_at',
+  createdAt: 'created_at',
+};
+export const adminUserDefaultOrder = 'created_at ASC, id';
+
 /** Khóa advisory tuần tự hóa các thay đổi có thể làm mất quản trị viên cuối. */
 const adminRosterLockKey = 7_804_202_031;
 
@@ -45,14 +55,17 @@ const adminRosterLockKey = 7_804_202_031;
 export class AdminUsersService {
   constructor(private readonly database: DatabaseService) {}
 
-  findAll(query: PaginationQuery): Promise<PageResult<AdminUserRow>> {
+  findAll(
+    query: PaginationQuery,
+    orderBy = adminUserDefaultOrder,
+  ): Promise<PageResult<AdminUserRow>> {
     return queryPage<AdminUserRow>(
       this.database,
       {
         columns: selectedColumns,
         table: 'admin_users',
         searchExpression: searchExpressions.adminUsers,
-        orderBy: 'created_at ASC, id',
+        orderBy,
       },
       query,
     );
@@ -178,6 +191,118 @@ export class AdminUsersService {
       });
     });
     return { ok: true };
+  }
+}
+
+type SessionRow = QueryResultRow & {
+  id: string;
+  userAgent: string | null;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+};
+
+/** Phiên còn hiệu lực (chưa thu hồi, chưa hết hạn), mới nhất trước. */
+async function listActiveSessions(
+  database: DatabaseService,
+  userId: string,
+  currentSessionId?: string,
+) {
+  const result = await database.query<SessionRow>(
+    `SELECT id, user_agent AS "userAgent", created_at AS "createdAt",
+            last_seen_at AS "lastSeenAt", expires_at AS "expiresAt"
+     FROM admin_sessions
+     WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+     ORDER BY last_seen_at DESC, id`,
+    [userId],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    current: row.id === currentSessionId,
+  }));
+}
+
+/** Quản lý phiên đăng nhập (thiết bị) của chính mình và của người khác. */
+@Injectable()
+export class AdminSessionsService {
+  constructor(private readonly database: DatabaseService) {}
+
+  listOwn(admin: AdminPrincipal) {
+    return listActiveSessions(this.database, admin.id, admin.sessionId);
+  }
+
+  /** Đăng xuất một thiết bị khác. Phiên hiện tại dùng /auth/logout. */
+  async revokeOwn(admin: AdminPrincipal, sessionId: string) {
+    if (sessionId === admin.sessionId) {
+      throw new BadRequestException(
+        'Đây là phiên hiện tại. Hãy dùng nút Đăng xuất.',
+      );
+    }
+    await this.database.withTransaction(async (client) => {
+      const result = await client.query<{ userAgent: string | null }>(
+        `UPDATE admin_sessions SET revoked_at = NOW()
+         WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+         RETURNING user_agent AS "userAgent"`,
+        [sessionId, admin.id],
+      );
+      if (!result.rows[0]) {
+        throw new NotFoundException('Không tìm thấy phiên đăng nhập.');
+      }
+      await insertActivity(client, {
+        actor: { id: admin.id, username: admin.username },
+        action: 'LOGOUT',
+        entityType: 'admin_user',
+        entityId: admin.id,
+        entityLabel: `Đăng xuất thiết bị khác: ${admin.username}`,
+      });
+    });
+    return { ok: true };
+  }
+
+  async listForUser(userId: string) {
+    await this.assertUserExists(userId);
+    return listActiveSessions(this.database, userId);
+  }
+
+  /**
+   * Thu hồi mọi phiên của một tài khoản (ví dụ nghi lộ mật khẩu). Khi áp
+   * dụng cho chính mình, phiên hiện tại được giữ lại.
+   */
+  async revokeAllForUser(userId: string, admin: AdminPrincipal) {
+    return this.database.withTransaction(async (client) => {
+      const user = await client.query<{ username: string }>(
+        'SELECT username FROM admin_users WHERE id = $1',
+        [userId],
+      );
+      if (!user.rows[0]) {
+        throw new NotFoundException('Không tìm thấy tài khoản.');
+      }
+      const result = await client.query(
+        `UPDATE admin_sessions SET revoked_at = NOW()
+         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+           AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+        [userId, userId === admin.id ? admin.sessionId : null],
+      );
+      const revoked = result.rowCount ?? 0;
+      await insertActivity(client, {
+        actor: { id: admin.id, username: admin.username },
+        action: 'UPDATE',
+        entityType: 'admin_user',
+        entityId: userId,
+        entityLabel: `Thu hồi ${revoked} phiên đăng nhập của ${user.rows[0].username}`,
+      });
+      return { revoked };
+    });
+  }
+
+  private async assertUserExists(userId: string) {
+    const result = await this.database.query(
+      'SELECT 1 FROM admin_users WHERE id = $1',
+      [userId],
+    );
+    if (!result.rowCount) {
+      throw new NotFoundException('Không tìm thấy tài khoản.');
+    }
   }
 }
 

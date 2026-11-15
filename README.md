@@ -99,6 +99,7 @@ terminal khác với `CONTENT_API_URL=http://localhost:4000/api/v1`.
 | `GET`  | `/api/v1/legal-resources?type=...` | Tài liệu đã công khai; type tùy chọn         |
 | `POST` | `/api/v1/contact-submissions`      | Lưu yêu cầu liên hệ hợp lệ                   |
 | `POST` | `/api/v1/auth/login`               | Đăng nhập quản trị                           |
+| `GET`  | `/api/v1/vehicle-categories`       | Danh mục xe theo thứ tự hiển thị             |
 
 Danh sách công khai giữ tương thích ngược: không truyền `page`/`limit` thì trả
 mảng như cũ; có `page` hoặc `limit` thì trả `{ items, pagination }` (mặc định
@@ -125,6 +126,16 @@ mảng như cũ; có `page` hoặc `limit` thì trả `{ items, pagination }` (m
 | `POST`            | `/api/v1/admin/contact-submissions/search`     | mọi     | Tìm contact, từ khóa trong body |
 | `PATCH`           | `/api/v1/admin/contact-submissions/:id/status` | mọi     | Cập nhật trạng thái             |
 | `DELETE`          | `/api/v1/admin/contact-submissions/:id`        | mọi     | Xóa yêu cầu và dữ liệu liên hệ  |
+| `GET`             | `/api/v1/admin/stats/overview`                 | mọi     | Mọi chỉ số dashboard trong 1 request |
+| `GET`             | `/api/v1/admin/stats/contacts?days=7..365`     | mọi     | Xu hướng liên hệ theo ngày, so với kỳ trước |
+| `GET`             | `/api/v1/admin/stats/activity?days=7..365`     | mọi     | Thao tác quản trị theo ngày     |
+| `POST`            | `/api/v1/admin/{vehicles,articles,legal-resources}/bulk` | mọi | `{ ids, action: publish\|unpublish\|delete }`, tối đa 100 |
+| `GET`, `POST`     | `/api/v1/admin/vehicle-categories`             | mọi     | Liệt kê (kèm số xe)/tạo danh mục |
+| `PATCH`, `DELETE` | `/api/v1/admin/vehicle-categories/:id`         | mọi     | Đổi tên (cập nhật luôn xe)/xóa (409 nếu còn xe) |
+| `GET`             | `/api/v1/admin/account/sessions`               | mọi     | Thiết bị đang đăng nhập của mình |
+| `DELETE`          | `/api/v1/admin/account/sessions/:id`           | mọi     | Đăng xuất một thiết bị khác     |
+| `GET`             | `/api/v1/admin/users/:id/sessions`             | admin   | Thiết bị đang đăng nhập của tài khoản |
+| `POST`            | `/api/v1/admin/users/:id/sessions/revoke`      | admin   | Đăng xuất tài khoản khỏi mọi thiết bị |
 
 Danh sách admin hỗ trợ `page` (từ 1), `limit` (mặc định 25, tối đa 100) và `q`
 (tối đa 100 ký tự). Danh sách xe, bài viết và tài liệu pháp lý nhận thêm
@@ -132,6 +143,23 @@ Danh sách admin hỗ trợ `page` (từ 1), `limit` (mặc định 25, tối đ
 dạng `{ items, pagination: { page, limit, total, totalPages } }`. Contact
 search nhận `{ "search": "...", "status": "new" }` trong body (cả hai tùy
 chọn) để dữ liệu cá nhân không xuất hiện trên URL/log truy cập.
+
+Sắp xếp: `sort=field:asc|desc` theo whitelist cột của từng danh sách (ví dụ
+`updatedAt:desc`; trong contact search là trường `sort` của body). Trường lạ →
+400. Lịch sử hoạt động lọc thêm `action`, `entityType`, `from`, `to`
+(YYYY-MM-DD, tính theo giờ Việt Nam, bao gồm hai đầu).
+
+Thống kê chia ngày theo `Asia/Ho_Chi_Minh`. Xu hướng liên hệ cộng bảng chi
+tiết với `contact_daily_stats` (số đếm theo ngày/danh mục/trạng thái, không có
+dữ liệu cá nhân, được lưu ngay trước khi job retention xóa yêu cầu), nên biểu
+đồ 12 tháng vẫn đúng dù yêu cầu chi tiết chỉ giữ 90 ngày. Thời gian phản hồi
+tính từ `created_at` tới `first_handled_at` (lần đầu rời trạng thái `new`).
+
+Mọi lỗi trả về `{ statusCode, error, message, requestId }`; lỗi không lường
+trước trả 500 với thông điệp chung và được log kèm stack + `requestId` (trùng
+header `X-Request-ID`). API gửi header bảo mật (CSP `default-src 'none'`,
+`nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`) và
+`Cache-Control: no-store` cho `/api/v1/admin/*`, `/api/v1/auth/*`.
 
 ### Rate limit
 
@@ -177,8 +205,9 @@ migration bỏ qua phần index — tìm kiếm vẫn đúng nhưng chậm hơn.
 `pg_try_advisory_xact_lock` riêng, nên khi có nhiều instance chỉ một instance
 thực hiện:
 
-1. Xóa yêu cầu liên hệ quá **90 ngày** (thời hạn doanh nghiệp đã duyệt) và ghi
-   một activity tổng hợp do `system` tạo.
+1. Lưu số đếm tổng hợp vào `contact_daily_stats`, rồi xóa yêu cầu liên hệ quá
+   **90 ngày** (thời hạn doanh nghiệp đã duyệt) và ghi một activity tổng hợp do
+   `system` tạo.
 2. Xóa phiên hết hạn/thu hồi quá 30 ngày và bộ đếm rate limit đã hết hạn.
 3. Nếu đặt `ACTIVITY_RETENTION_DAYS`, xóa lịch sử cũ hơn số ngày đó.
 
@@ -198,6 +227,7 @@ file trong một transaction và được bảo vệ bằng advisory lock.
 | `004_contact_submissions.sql`              | Hộp thư liên hệ                                       |
 | `005_admin_users_sessions_rate_limits.sql` | Tài khoản, phiên, rate limit, `actor_id`, trigger `updated_at` |
 | `006_search_trigram_indexes.sql`           | Index `pg_trgm` cho tìm kiếm                          |
+| `007_dashboard_stats_sessions_categories.sql` | Index thống kê, `first_handled_at`, `contact_daily_stats`, bảng `vehicle_categories` |
 
 Nâng cấp từ phiên bản cũ: chạy `npm run db:migrate`, đảm bảo
 `ADMIN_USERNAME`/`ADMIN_PASSWORD` (mật khẩu ≥ 12 ký tự) có trong môi trường
@@ -256,7 +286,13 @@ npm run start:prod
 ## Giới hạn còn lại
 
 - Chống bot ở form chỉ có honeypot và rate limit; cân nhắc CAPTCHA nếu bị spam.
-- Chưa có API upload ảnh.
+- Chưa có API upload ảnh (cần chọn nơi lưu: Supabase Storage hoặc đĩa VPS).
+- Thông tin website (hotline, địa chỉ…) vẫn nằm trong mã client, chưa quản lý
+  trong trang quản trị.
+- Danh mục trong form liên hệ công khai vẫn là danh sách cố định
+  (`contact-submissions.validation.ts`), chưa đọc từ `vehicle_categories`.
+- Xóa thủ công một yêu cầu liên hệ cũng làm nó biến khỏi số liệu thống kê
+  (chỉ job retention mới lưu số đếm trước khi xóa).
 - Chưa có xác thực hai lớp (2FA) cho tài khoản quản trị.
 - Tìm kiếm chưa bỏ dấu tiếng Việt (cần extension `unaccent` và hàm wrapper
   IMMUTABLE nếu muốn tìm "xe cuu ho" ra "xe cứu hộ").

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -19,7 +20,13 @@ import {
   parsePublishedFilter,
 } from '../common/pagination.js';
 import { parseVehicleInput } from '../content/content-validation.js';
-import { VehiclesService } from './vehicles.service.js';
+import { parseBulkRequest } from '../common/bulk-content.js';
+import { parseSort } from '../common/sorting.js';
+import {
+  VehiclesService,
+  vehicleSortColumns,
+  vehicleDefaultOrder,
+} from './vehicles.service.js';
 
 @Controller('api/v1/vehicles')
 export class VehiclesController {
@@ -54,11 +61,20 @@ export class AdminVehiclesController {
     @Query('limit') limit?: string,
     @Query('q') search?: string,
     @Query('published') published?: string,
+    @Query('sort') sort?: string,
   ) {
     return this.vehicles.findAll(
       parsePaginationQuery(page, limit, search),
       parsePublishedFilter(published),
+      parseSort(sort, vehicleSortColumns, vehicleDefaultOrder),
     );
+  }
+
+  /** Xuất bản / chuyển nháp / xóa nhiều mục: { ids, action }. */
+  @Post('bulk')
+  @HttpCode(200)
+  bulk(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.vehicles.bulk(parseBulkRequest(body), actor);
   }
 
   @Post()

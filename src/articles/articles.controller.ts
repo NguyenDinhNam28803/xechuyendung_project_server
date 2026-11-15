@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -19,7 +20,13 @@ import {
   parsePublishedFilter,
 } from '../common/pagination.js';
 import { parseArticleInput } from '../content/content-validation.js';
-import { ArticlesService } from './articles.service.js';
+import { parseBulkRequest } from '../common/bulk-content.js';
+import { parseSort } from '../common/sorting.js';
+import {
+  ArticlesService,
+  articleSortColumns,
+  articleDefaultOrder,
+} from './articles.service.js';
 
 @Controller('api/v1/articles')
 export class ArticlesController {
@@ -54,11 +61,20 @@ export class AdminArticlesController {
     @Query('limit') limit?: string,
     @Query('q') search?: string,
     @Query('published') published?: string,
+    @Query('sort') sort?: string,
   ) {
     return this.articles.findAll(
       parsePaginationQuery(page, limit, search),
       parsePublishedFilter(published),
+      parseSort(sort, articleSortColumns, articleDefaultOrder),
     );
+  }
+
+  /** Xuất bản / chuyển nháp / xóa nhiều mục: { ids, action }. */
+  @Post('bulk')
+  @HttpCode(200)
+  bulk(@Body() body: unknown, @CurrentActor() actor: Actor) {
+    return this.articles.bulk(parseBulkRequest(body), actor);
   }
 
   @Post()

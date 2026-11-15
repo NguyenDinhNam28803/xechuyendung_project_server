@@ -8,6 +8,7 @@ import {
 import { queryPage } from '../common/paged-query.js';
 import type { PageResult, PaginationQuery } from '../common/pagination.js';
 import { searchExpressions } from '../common/search.js';
+import { businessTimeZone } from '../common/time.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { ContactSubmissionInput } from './contact-submissions.validation.js';
 
@@ -34,9 +35,19 @@ type ContactRow = QueryResultRow & {
   status: ContactStatus;
   consentText: string;
   consentAt: Date;
+  firstHandledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+/** Cột được phép sắp xếp trong hộp thư liên hệ (`sort` trong body tìm kiếm). */
+export const contactSortColumns = {
+  createdAt: 'created_at',
+  name: 'name',
+  category: 'category',
+  status: 'status',
+};
+export const contactDefaultOrder = 'created_at DESC, id DESC';
 
 /** Thời hạn lưu trữ đã được doanh nghiệp phê duyệt. */
 export const contactRetentionDays = 90;
@@ -69,6 +80,7 @@ export class ContactSubmissionsService {
   findRecent(
     query: PaginationQuery,
     status?: ContactStatus,
+    orderBy = contactDefaultOrder,
   ): Promise<PageResult<ContactRow>> {
     return queryPage<ContactRow>(
       this.database,
@@ -77,10 +89,11 @@ export class ContactSubmissionsService {
         columns: `id, name, phone, category, location, message,
                   vehicle_slug AS "vehicleSlug", status,
                   consent_text AS "consentText", consent_at AS "consentAt",
+                  first_handled_at AS "firstHandledAt",
                   created_at AS "createdAt", updated_at AS "updatedAt"`,
         table: 'contact_submissions',
         searchExpression: searchExpressions.contactSubmissions,
-        orderBy: 'created_at DESC, id DESC',
+        orderBy,
       },
       query,
     );
@@ -89,7 +102,14 @@ export class ContactSubmissionsService {
   async updateStatus(id: string, status: ContactStatus, actor: Actor) {
     return this.database.withTransaction(async (client) => {
       const result = await client.query<ContactRow>(
-        `UPDATE contact_submissions SET status = $1
+        // first_handled_at ghi một lần, khi yêu cầu rời trạng thái "new"
+        // lần đầu, để tính thời gian phản hồi trên dashboard.
+        `UPDATE contact_submissions
+         SET status = $1::varchar,
+             first_handled_at = CASE
+               WHEN $1::varchar <> 'new' THEN COALESCE(first_handled_at, NOW())
+               ELSE first_handled_at
+             END
          WHERE id = $2
          RETURNING id, status`,
         [status, id],
@@ -139,6 +159,20 @@ export class ContactSubmissionsService {
     const outcome = await this.database.runExclusive(
       purgeLockKey,
       async (client) => {
+        // Lưu số đếm theo ngày/danh mục/trạng thái (không có dữ liệu cá nhân)
+        // trước khi xóa để biểu đồ xu hướng vẫn xem được quá thời hạn lưu.
+        // NOW() cố định trong transaction nên hai câu lệnh dùng cùng mốc.
+        await client.query(
+          `INSERT INTO contact_daily_stats (day, category, status, total)
+           SELECT (created_at AT TIME ZONE $2)::date, category, status,
+                  COUNT(*)::int
+           FROM contact_submissions
+           WHERE created_at < NOW() - ($1 * INTERVAL '1 day')
+           GROUP BY 1, 2, 3
+           ON CONFLICT (day, category, status)
+           DO UPDATE SET total = contact_daily_stats.total + EXCLUDED.total`,
+          [contactRetentionDays, businessTimeZone],
+        );
         const result = await client.query<{ id: string }>(
           `DELETE FROM contact_submissions
            WHERE created_at < NOW() - ($1 * INTERVAL '1 day')

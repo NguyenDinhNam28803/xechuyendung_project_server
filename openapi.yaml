@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Xe Chuyên Dụng API
-  version: 1.1.0
+  version: 1.2.0
   description: Public content, admin CMS, activity history, and contact intake API.
 servers:
   - url: http://localhost:4000
@@ -15,6 +15,7 @@ tags:
   - name: Admin content
   - name: Contact submissions
   - name: Admin users
+  - name: Admin dashboard
 paths:
   /health/live:
     get:
@@ -132,6 +133,10 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
+        - name: sort
+          in: query
+          description: "Sort as field:asc|desc. Fields: username, displayName, role, isActive, lastLoginAt, createdAt."
+          schema: { type: string, pattern: "^(username|displayName|role|isActive|lastLoginAt|createdAt)(:(asc|desc))?$" }
       responses:
         "200":
           description: A page of admin accounts.
@@ -307,6 +312,10 @@ paths:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
         - $ref: "#/components/parameters/Published"
+        - name: sort
+          in: query
+          description: "Sort as field:asc|desc. Fields: name, make, category, isPublished, createdAt, updatedAt."
+          schema: { type: string, pattern: "^(name|make|category|isPublished|createdAt|updatedAt)(:(asc|desc))?$" }
       responses:
         "200":
           description: A page of vehicles.
@@ -328,6 +337,27 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/vehicles/bulk:
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Publish, unpublish or delete several vehicles in one transaction
+      description: >
+        Unknown ids are ignored. Only rows that actually change are audited
+        (one activity entry per row); `affected` reports how many changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkRequest" }
+      responses:
+        "200":
+          description: Bulk result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/admin/vehicles/{id}:
     parameters:
       - $ref: "#/components/parameters/Id"
@@ -364,6 +394,10 @@ paths:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Search"
         - $ref: "#/components/parameters/Published"
+        - name: sort
+          in: query
+          description: "Sort as field:asc|desc. Fields: title, category, isPublished, createdAt, updatedAt."
+          schema: { type: string, pattern: "^(title|category|isPublished|createdAt|updatedAt)(:(asc|desc))?$" }
       responses:
         "200":
           description: A page of articles.
@@ -385,6 +419,27 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/articles/bulk:
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Publish, unpublish or delete several articles in one transaction
+      description: >
+        Unknown ids are ignored. Only rows that actually change are audited
+        (one activity entry per row); `affected` reports how many changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkRequest" }
+      responses:
+        "200":
+          description: Bulk result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/admin/articles/{id}:
     parameters:
       - $ref: "#/components/parameters/Id"
@@ -453,6 +508,10 @@ paths:
           schema:
             type: string
             enum: [policy, regulation, legal_guide]
+        - name: sort
+          in: query
+          description: "Sort as field:asc|desc. Fields: title, resourceType, isPublished, createdAt, updatedAt."
+          schema: { type: string, pattern: "^(title|resourceType|isPublished|createdAt|updatedAt)(:(asc|desc))?$" }
       responses:
         "200":
           description: A page of legal resources.
@@ -474,6 +533,27 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/legal-resources/bulk:
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Publish, unpublish or delete several legal resources in one transaction
+      description: >
+        Unknown ids are ignored. Only rows that actually change are audited
+        (one activity entry per row); `affected` reports how many changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkRequest" }
+      responses:
+        "200":
+          description: Bulk result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/admin/legal-resources/{id}:
     parameters:
       - $ref: "#/components/parameters/Id"
@@ -505,12 +585,27 @@ paths:
       tags: [Admin content]
       security: [{ AdminBearer: [] }]
       summary: List recent activity
+      description: >
+        Optional filters by action, entity type and an inclusive date range
+        (`from`/`to`, YYYY-MM-DD in the Asia/Ho_Chi_Minh calendar).
       parameters:
         - $ref: "#/components/parameters/Page"
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
         - $ref: "#/components/parameters/Search"
+        - name: action
+          in: query
+          schema: { $ref: "#/components/schemas/ActivityAction" }
+        - name: entityType
+          in: query
+          schema: { $ref: "#/components/schemas/ActivityEntityType" }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
       responses:
         "200":
           description: A page of recent events.
@@ -586,6 +681,201 @@ paths:
         "200": { description: Deleted. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/users/{id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Admin users]
+      security: [{ AdminBearer: [] }]
+      summary: List active sessions (devices) of an account (role admin only)
+      responses:
+        "200":
+          description: Active sessions, most recently used first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/users/{id}/sessions/revoke:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [Admin users]
+      security: [{ AdminBearer: [] }]
+      summary: Sign an account out of every device (role admin only)
+      description: When applied to yourself the current session is kept.
+      responses:
+        "200":
+          description: Number of revoked sessions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/account/sessions:
+    get:
+      tags: [Authentication]
+      security: [{ AdminBearer: [] }]
+      summary: List the current admin's active sessions
+      responses:
+        "200":
+          description: Active sessions; `current` marks this session.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/account/sessions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [Authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Sign out one of your other devices
+      responses:
+        "200": { description: Session revoked. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/admin/stats/overview:
+    get:
+      tags: [Admin dashboard]
+      security: [{ AdminBearer: [] }]
+      summary: All dashboard counters in one request
+      responses:
+        "200":
+          description: Dashboard counters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatsOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/stats/contacts:
+    get:
+      tags: [Admin dashboard]
+      security: [{ AdminBearer: [] }]
+      summary: Contact request trend for the last N days
+      description: >
+        Days are counted in Asia/Ho_Chi_Minh. Includes archived daily counts so
+        trends outlive the 90-day retention of individual requests.
+      parameters:
+        - $ref: "#/components/parameters/StatsDays"
+      responses:
+        "200":
+          description: Contact statistics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContactStats" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/stats/activity:
+    get:
+      tags: [Admin dashboard]
+      security: [{ AdminBearer: [] }]
+      summary: Admin activity for the last N days
+      parameters:
+        - $ref: "#/components/parameters/StatsDays"
+      responses:
+        "200":
+          description: Activity statistics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityStats" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/vehicle-categories:
+    get:
+      tags: [Public content]
+      summary: List vehicle categories in display order
+      responses:
+        "200":
+          description: Categories.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, description]
+                  properties:
+                    name: { type: string }
+                    description: { type: string }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /api/v1/admin/vehicle-categories:
+    get:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: List vehicle categories with usage counts
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        - $ref: "#/components/parameters/Search"
+      responses:
+        "200":
+          description: A page of categories.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehicleCategoryPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Create a vehicle category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehicleCategoryInput" }
+      responses:
+        "201":
+          description: Created category.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehicleCategory" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/admin/vehicle-categories/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Update a category; renaming also renames it on every vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VehicleCategoryPatch" }
+      responses:
+        "200":
+          description: Updated category.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VehicleCategory" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [Admin content]
+      security: [{ AdminBearer: [] }]
+      summary: Delete an unused category (409 while vehicles still use it)
+      responses:
+        "200": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 components:
   securitySchemes:
     AdminBearer:
@@ -620,6 +910,11 @@ components:
       in: query
       description: Case-insensitive substring; "%" and "_" are matched literally.
       schema: { type: string, maxLength: 100 }
+    StatsDays:
+      name: days
+      in: query
+      description: Number of days including today.
+      schema: { type: integer, minimum: 7, maximum: 365, default: 30 }
     Published:
       name: published
       in: query
@@ -715,9 +1010,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/VehicleInput"
         - type: object
-          required: [id, sourceUrl]
+          required: [id, sourceUrl, createdAt, updatedAt]
           properties:
             id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     VehicleFields:
       type: object
       properties:
@@ -766,9 +1063,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/ArticleInput"
         - type: object
-          required: [id]
+          required: [id, createdAt, updatedAt]
           properties:
             id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     ArticleFields:
       type: object
       properties:
@@ -838,6 +1137,10 @@ components:
           type: string
           enum: [new, in_progress, contacted, closed, spam]
           description: Only return submissions with this status.
+        sort:
+          type: string
+          pattern: "^(createdAt|name|category|status)(:(asc|desc))?$"
+          description: "Sort as field:asc|desc (default createdAt:desc)."
       additionalProperties: false
     ContactSubmissionInput:
       type: object
@@ -873,6 +1176,7 @@ components:
         - status
         - consentText
         - consentAt
+        - firstHandledAt
         - createdAt
         - updatedAt
       properties:
@@ -888,6 +1192,10 @@ components:
           enum: [new, in_progress, contacted, closed, spam]
         consentText: { type: string }
         consentAt: { type: string, format: date-time }
+        firstHandledAt:
+          type: [string, "null"]
+          format: date-time
+          description: When the request first left the "new" status.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     PageInfo:
@@ -949,20 +1257,8 @@ components:
               id: { type: string, format: uuid }
               actor: { type: string, description: "Username at the time of the action, or system." }
               actorId: { type: [string, "null"], format: uuid }
-              action:
-                type: string
-                enum: [CREATE, UPDATE, DELETE, IMPORT, LOGIN, LOGOUT]
-              entityType:
-                type: string
-                enum:
-                  - vehicle
-                  - article
-                  - policy
-                  - regulation
-                  - legal_guide
-                  - contact_submission
-                  - admin_user
-                  - system
+              action: { $ref: "#/components/schemas/ActivityAction" }
+              entityType: { $ref: "#/components/schemas/ActivityEntityType" }
               entityId: { type: [string, "null"], format: uuid }
               entityLabel: { type: string }
               createdAt: { type: string, format: date-time }
@@ -976,6 +1272,237 @@ components:
             - { type: string }
             - { type: array, items: { type: string } }
         error: { type: string }
+        requestId:
+          type: string
+          description: Matches the X-Request-ID response header; quote it when reporting a problem.
+    ActivityAction:
+      type: string
+      enum: [CREATE, UPDATE, DELETE, IMPORT, LOGIN, LOGOUT]
+    ActivityEntityType:
+      type: string
+      enum:
+        - vehicle
+        - vehicle_category
+        - article
+        - policy
+        - regulation
+        - legal_guide
+        - contact_submission
+        - admin_user
+        - system
+    ContactStatusCounts:
+      type: object
+      required: [new, in_progress, contacted, closed, spam]
+      properties:
+        new: { type: integer }
+        in_progress: { type: integer }
+        contacted: { type: integer }
+        closed: { type: integer }
+        spam: { type: integer }
+    ActionCounts:
+      type: object
+      required: [CREATE, UPDATE, DELETE, IMPORT, LOGIN, LOGOUT]
+      properties:
+        CREATE: { type: integer }
+        UPDATE: { type: integer }
+        DELETE: { type: integer }
+        IMPORT: { type: integer }
+        LOGIN: { type: integer }
+        LOGOUT: { type: integer }
+    PublishCount:
+      type: object
+      required: [total, published, draft]
+      properties:
+        total: { type: integer }
+        published: { type: integer }
+        draft: { type: integer }
+    StatsOverview:
+      type: object
+      required: [content, contacts, users, generatedAt]
+      properties:
+        content:
+          type: object
+          required: [vehicles, articles, legal]
+          properties:
+            vehicles: { $ref: "#/components/schemas/PublishCount" }
+            articles: { $ref: "#/components/schemas/PublishCount" }
+            legal:
+              type: object
+              required: [policy, regulation, legal_guide]
+              properties:
+                policy: { $ref: "#/components/schemas/PublishCount" }
+                regulation: { $ref: "#/components/schemas/PublishCount" }
+                legal_guide: { $ref: "#/components/schemas/PublishCount" }
+        contacts:
+          type: object
+          required: [total, byStatus, overdueNew, overdueHours, avgResponseHours, handledLast30Days]
+          properties:
+            total: { type: integer }
+            byStatus: { $ref: "#/components/schemas/ContactStatusCounts" }
+            overdueNew: { type: integer, description: "New requests older than overdueHours." }
+            overdueHours: { type: integer }
+            avgResponseHours: { type: [number, "null"], description: "Last 30 days." }
+            handledLast30Days: { type: integer }
+        users:
+          type: object
+          required: [activeUsers, totalUsers, activeSessions]
+          properties:
+            activeUsers: { type: integer }
+            totalUsers: { type: integer }
+            activeSessions: { type: integer }
+        generatedAt: { type: string, format: date-time }
+    ContactStats:
+      type: object
+      required:
+        - days
+        - from
+        - to
+        - total
+        - previousTotal
+        - changePercent
+        - byStatus
+        - handledRate
+        - avgResponseHours
+        - byCategory
+        - topVehicles
+        - detailRetentionDays
+        - series
+      properties:
+        days: { type: integer }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        total: { type: integer }
+        previousTotal: { type: integer }
+        changePercent: { type: [number, "null"], description: "null when the previous period is empty." }
+        byStatus: { $ref: "#/components/schemas/ContactStatusCounts" }
+        handledRate: { type: [number, "null"], description: "% of non-spam requests contacted or closed." }
+        avgResponseHours: { type: [number, "null"] }
+        byCategory:
+          type: array
+          items:
+            type: object
+            required: [category, total]
+            properties:
+              category: { type: string }
+              total: { type: integer }
+        topVehicles:
+          type: array
+          items:
+            type: object
+            required: [slug, name, total]
+            properties:
+              slug: { type: string }
+              name: { type: [string, "null"] }
+              total: { type: integer }
+        detailRetentionDays: { type: integer }
+        series:
+          type: array
+          items:
+            type: object
+            required: [day, total, byStatus]
+            properties:
+              day: { type: string, format: date }
+              total: { type: integer }
+              byStatus: { $ref: "#/components/schemas/ContactStatusCounts" }
+    ActivityStats:
+      type: object
+      required: [days, from, to, total, byAction, byEntity, topActors, series]
+      properties:
+        days: { type: integer }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        total: { type: integer }
+        byAction: { $ref: "#/components/schemas/ActionCounts" }
+        byEntity:
+          type: array
+          items:
+            type: object
+            required: [entityType, total]
+            properties:
+              entityType: { $ref: "#/components/schemas/ActivityEntityType" }
+              total: { type: integer }
+        topActors:
+          type: array
+          items:
+            type: object
+            required: [actor, total]
+            properties:
+              actor: { type: string }
+              total: { type: integer }
+        series:
+          type: array
+          items:
+            type: object
+            required: [day, total, byAction]
+            properties:
+              day: { type: string, format: date }
+              total: { type: integer }
+              byAction: { $ref: "#/components/schemas/ActionCounts" }
+    BulkRequest:
+      type: object
+      required: [ids, action]
+      additionalProperties: false
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { type: string, format: uuid }
+        action:
+          type: string
+          enum: [publish, unpublish, delete]
+    BulkResult:
+      type: object
+      required: [action, requested, affected]
+      properties:
+        action: { type: string, enum: [publish, unpublish, delete] }
+        requested: { type: integer }
+        affected: { type: integer }
+    AdminSession:
+      type: object
+      required: [id, userAgent, createdAt, lastSeenAt, expiresAt, current]
+      properties:
+        id: { type: string, format: uuid }
+        userAgent: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        current: { type: boolean }
+    VehicleCategory:
+      type: object
+      required: [id, name, description, sortOrder, vehicleCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        sortOrder: { type: integer }
+        vehicleCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    VehicleCategoryInput:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        sortOrder: { type: integer, minimum: 0, maximum: 10000 }
+    VehicleCategoryPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        sortOrder: { type: integer, minimum: 0, maximum: 10000 }
+    VehicleCategoryPage:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/VehicleCategory" }
+        pagination: { $ref: "#/components/schemas/PageInfo" }
   responses:
     BadRequest:
       description: Invalid request data.

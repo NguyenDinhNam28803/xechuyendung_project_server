@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { QueryResultRow } from 'pg';
 import { type Actor, insertActivity } from '../activity/activity.service.js';
+import {
+  type BulkRequest,
+  runBulkContentAction,
+} from '../common/bulk-content.js';
 import { rethrowUniqueViolation } from '../common/database-errors.js';
 import { queryPage } from '../common/paged-query.js';
 import type { PageResult, PaginationQuery } from '../common/pagination.js';
@@ -41,6 +45,16 @@ const selectedColumns = `
   created_at AS "createdAt", updated_at AS "updatedAt"
 `;
 
+/** Cột được phép sắp xếp trong danh sách quản trị (?sort=field:asc|desc). */
+export const legalResourceSortColumns = {
+  title: 'title',
+  resourceType: 'resource_type',
+  isPublished: 'is_published',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+};
+export const legalResourceDefaultOrder = 'updated_at DESC, id';
+
 const conflictMessage = 'Slug tài liệu đã tồn tại.';
 
 @Injectable()
@@ -69,6 +83,7 @@ export class LegalResourcesService {
     query: PaginationQuery,
     resourceType?: LegalResourceType,
     isPublished?: boolean,
+    orderBy = legalResourceDefaultOrder,
   ): Promise<PageResult<LegalResourceRow>> {
     return queryPage<LegalResourceRow>(
       this.database,
@@ -80,7 +95,7 @@ export class LegalResourcesService {
           { column: 'is_published', value: isPublished },
         ],
         searchExpression: searchExpressions.legalResources,
-        orderBy: 'updated_at DESC, id',
+        orderBy,
       },
       query,
     );
@@ -145,6 +160,19 @@ export class LegalResourcesService {
     } catch (error) {
       rethrowUniqueViolation(error, conflictMessage);
     }
+  }
+
+  bulk(request: BulkRequest, actor: Actor) {
+    return runBulkContentAction(
+      this.database,
+      {
+        table: 'legal_resources',
+        labelColumn: 'title',
+        entityTypeSql: 'resource_type',
+      },
+      request,
+      actor,
+    );
   }
 
   async remove(id: string, actor: Actor) {
