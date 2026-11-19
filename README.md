@@ -165,8 +165,16 @@ header `X-Request-ID`). API gửi header bảo mật (CSP `default-src 'none'`,
 
 | Endpoint                             | Giới hạn                                   |
 | ------------------------------------ | ------------------------------------------ |
-| `POST /api/v1/auth/login`            | 5 request/IP/15 phút và 10 lần/tài khoản/15 phút |
+| `POST /api/v1/auth/login`            | 20 request/IP/15 phút (chống spam lưu lượng) |
+| Đăng nhập **sai**                    | 5 lần/(IP, tài khoản)/15 phút và 50 lần/tài khoản/giờ (mọi IP) |
 | `POST /api/v1/contact-submissions`   | 10 request/IP/giờ                          |
+
+Giới hạn đăng nhập chỉ đếm **lần sai** (`src/auth/login-throttle.ts`). Kẻ tấn
+công thử sai từ IP của họ chỉ khóa chính cặp (IP, tài khoản) đó; chủ tài khoản
+đăng nhập từ IP khác không bị ảnh hưởng. Đăng nhập đúng xóa bộ đếm của cặp.
+Giới hạn tổng theo tài khoản chặn dò mật khẩu phân tán qua nhiều IP; đánh đổi
+là kẻ tấn công có trên 50 IP vẫn khóa được một tài khoản tối đa 1 giờ (2FA là
+lớp bảo vệ tiếp theo). Bị chặn trả 429 kèm header `Retry-After`.
 
 Bộ đếm lưu trong bảng UNLOGGED `rate_limits` bằng **một câu upsert nguyên tử**,
 nên dùng chung giữa mọi instance. Khóa được băm SHA-256 (không lưu IP thô).

@@ -143,8 +143,8 @@ describe('AppController (e2e)', () => {
       .expect(401);
   });
 
-  it('rate limits repeated admin login attempts', async () => {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+  it('rate limits repeated admin login requests from one IP', async () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ username: 'invalid', password: 'invalid' });

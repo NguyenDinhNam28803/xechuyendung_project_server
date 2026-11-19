@@ -181,7 +181,7 @@ flowchart LR
 | -------------------------------------------- | :---: | :----: | :---: | ----------------------------------- |
 | Xem nội dung đã công khai                    |  ✅   |   ✅   |  ✅   | `is_published = TRUE` trong truy vấn |
 | Gửi yêu cầu tư vấn                           |  ✅   |   ✅   |  ✅   | Rate limit 10/IP/giờ, honeypot       |
-| Đăng nhập, đổi mật khẩu của mình             |   –   |   ✅   |  ✅   | Rate limit 5/IP + 10/tài khoản/15 phút |
+| Đăng nhập, đổi mật khẩu của mình             |   –   |   ✅   |  ✅   | Chỉ đếm lần sai: 5/(IP, tài khoản)/15 phút, 50/tài khoản/giờ |
 | Xem bản nháp, CRUD nội dung, nhập mẫu        |   –   |   ✅   |  ✅   | `AdminAuthGuard`                    |
 | Xem/xử lý yêu cầu liên hệ                    |   –   |   ✅   |  ✅   | `AdminAuthGuard`                    |
 | Xem lịch sử hoạt động                        |   –   |   ✅   |  ✅   | `AdminAuthGuard`                    |

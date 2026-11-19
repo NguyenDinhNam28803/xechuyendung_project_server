@@ -54,9 +54,13 @@ paths:
       tags: [Authentication]
       summary: Exchange admin credentials for a revocable session token
       description: >
-        Rate limited to 5 requests per IP per 15 minutes and 10 attempts per
-        username per 15 minutes. Unknown users, wrong passwords and disabled
-        accounts all return the same 401 message.
+        At most 20 requests per IP per 15 minutes. Only failed attempts are
+        counted for lockout: 5 failures per (IP, username) per 15 minutes and
+        50 failures per username across all IPs per hour; a successful login
+        clears the (IP, username) counter, so an attacker cannot lock the owner
+        out from a different IP. Blocked requests get 429 with Retry-After.
+        Unknown users, wrong passwords and disabled accounts all return the
+        same 401 message.
       requestBody:
         required: true
         content:
