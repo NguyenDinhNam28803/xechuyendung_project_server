@@ -27,6 +27,7 @@ type AdminUserRow = QueryResultRow & {
   role: AdminRole;
   isActive: boolean;
   lastLoginAt: Date | null;
+  twoFactorEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -35,6 +36,7 @@ type AdminUserRow = QueryResultRow & {
 const selectedColumns = `
   id, username, display_name AS "displayName", role,
   is_active AS "isActive", last_login_at AS "lastLoginAt",
+  (totp_secret_enc IS NOT NULL) AS "twoFactorEnabled",
   created_at AS "createdAt", updated_at AS "updatedAt"
 `;
 
