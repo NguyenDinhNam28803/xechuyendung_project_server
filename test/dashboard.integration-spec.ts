@@ -12,6 +12,8 @@ import { addDays, todayInBusinessZone } from '../src/common/time.js';
 import { ContactSubmissionsService } from '../src/contact-submissions/contact-submissions.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { LoginThrottle } from '../src/auth/login-throttle.js';
+import { TwoFactorService } from '../src/auth/two-factor.service.js';
+import { asSession } from './helpers/session.js';
 import { RateLimitService } from '../src/security/rate-limit.service.js';
 import { StatsService } from '../src/stats/stats.service.js';
 import { VehicleCategoriesService } from '../src/vehicle-categories/vehicle-categories.service.js';
@@ -61,10 +63,16 @@ describeIntegration('PostgreSQL integration: dashboard v2', () => {
       [`dash_${suffix}`, hash],
     );
     ownerId = owner.rows[0].id;
-    const auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
-    const login = await auth.login(`dash_${suffix}`, 'dashboard-password-123', {
-      userAgent: 'integration-a',
-    });
+    const auth = new AdminAuthService(
+      database,
+      new LoginThrottle(rateLimit),
+      new TwoFactorService(database, rateLimit),
+    );
+    const login = asSession(
+      await auth.login(`dash_${suffix}`, 'dashboard-password-123', {
+        userAgent: 'integration-a',
+      }),
+    );
     principal = (await auth.authenticate(login.accessToken)) as AdminPrincipal;
   }, 30_000);
 
@@ -323,12 +331,16 @@ describeIntegration('PostgreSQL integration: dashboard v2', () => {
   }, 30_000);
 
   it('lists and revokes admin sessions', async () => {
-    const auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
+    const auth = new AdminAuthService(
+      database,
+      new LoginThrottle(rateLimit),
+      new TwoFactorService(database, rateLimit),
+    );
     const sessions = new AdminSessionsService(database);
-    const second = await auth.login(
-      `dash_${suffix}`,
-      'dashboard-password-123',
-      { userAgent: 'integration-b' },
+    const second = asSession(
+      await auth.login(`dash_${suffix}`, 'dashboard-password-123', {
+        userAgent: 'integration-b',
+      }),
     );
     const own = await sessions.listOwn(principal);
     expect(own.length).toBeGreaterThanOrEqual(2);

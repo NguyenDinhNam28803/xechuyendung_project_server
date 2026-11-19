@@ -4,6 +4,7 @@ import type { DatabaseService } from '../database/database.service.js';
 import { TooManyAttemptsException } from '../common/too-many-attempts.exception.js';
 import { AdminAuthService, hashSessionToken } from './admin-auth.service.js';
 import type { LoginThrottle } from './login-throttle.js';
+import type { TwoFactorService } from './two-factor.service.js';
 import { hashPassword } from './password.js';
 
 function throttleMock(blocked = false) {
@@ -16,6 +17,18 @@ function throttleMock(blocked = false) {
   };
 }
 const allowAll = throttleMock() as unknown as LoginThrottle;
+const twoFactorStub = {
+  isRequiredFor: () => false,
+  consumeFactor: vi.fn(),
+} as unknown as TwoFactorService;
+
+/** login() trả phiên hoặc yêu cầu bước 2FA; các test này cần phiên. */
+function asSession<T>(result: T) {
+  if (!result || typeof result !== 'object' || !('accessToken' in result)) {
+    throw new Error('Expected a session, got a 2FA challenge.');
+  }
+  return result as Extract<T, { accessToken: string }>;
+}
 
 async function userRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -25,6 +38,7 @@ async function userRow(overrides: Record<string, unknown> = {}) {
     role: 'editor',
     passwordHash: await hashPassword('editor-password-123'),
     isActive: true,
+    twoFactorEnabled: false,
     ...overrides,
   };
 }
@@ -46,11 +60,13 @@ function createDatabase(row: unknown) {
 describe('AdminAuthService', () => {
   it('issues an opaque token and stores only its SHA-256 hash', async () => {
     const { database, transactionQuery } = createDatabase(await userRow());
-    const auth = new AdminAuthService(database, allowAll);
+    const auth = new AdminAuthService(database, allowAll, twoFactorStub);
 
-    const result = await auth.login('Editor01', 'editor-password-123', {
-      userAgent: 'vitest',
-    });
+    const result = asSession(
+      await auth.login('Editor01', 'editor-password-123', {
+        userAgent: 'vitest',
+      }),
+    );
 
     expect(result.expiresIn).toBe(8 * 60 * 60);
     expect(result.user).toMatchObject({ username: 'editor01', role: 'editor' });
@@ -67,14 +83,17 @@ describe('AdminAuthService', () => {
     const wrong = new AdminAuthService(
       createDatabase(await userRow()).database,
       allowAll,
+      twoFactorStub,
     );
     const unknown = new AdminAuthService(
       createDatabase(undefined).database,
       allowAll,
+      twoFactorStub,
     );
     const inactive = new AdminAuthService(
       createDatabase(await userRow({ isActive: false })).database,
       allowAll,
+      twoFactorStub,
     );
 
     const attempts = [
@@ -95,6 +114,7 @@ describe('AdminAuthService', () => {
     const auth = new AdminAuthService(
       database,
       throttle as unknown as LoginThrottle,
+      twoFactorStub,
     );
 
     await expect(
@@ -112,6 +132,7 @@ describe('AdminAuthService', () => {
     const wrong = new AdminAuthService(
       createDatabase(await userRow()).database,
       failing as unknown as LoginThrottle,
+      twoFactorStub,
     );
     await expect(
       wrong.login('editor01', 'not-the-password', { ip: '198.51.100.1' }),
@@ -127,6 +148,7 @@ describe('AdminAuthService', () => {
       new AdminAuthService(
         createDatabase(undefined).database,
         unknownUser as unknown as LoginThrottle,
+        twoFactorStub,
       ).login('ghost', 'whatever-password', { ip: '198.51.100.1' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(unknownUser.recordFailure).toHaveBeenCalledTimes(1);
@@ -135,6 +157,7 @@ describe('AdminAuthService', () => {
     await new AdminAuthService(
       createDatabase(await userRow()).database,
       succeeding as unknown as LoginThrottle,
+      twoFactorStub,
     ).login('editor01', 'editor-password-123', { ip: '198.51.100.1' });
     expect(succeeding.recordSuccess).toHaveBeenCalledWith(
       '198.51.100.1',
@@ -145,9 +168,47 @@ describe('AdminAuthService', () => {
 
   it('rejects malformed tokens without querying the database', async () => {
     const { database, query } = createDatabase(undefined);
-    const auth = new AdminAuthService(database, allowAll);
+    const auth = new AdminAuthService(database, allowAll, twoFactorStub);
 
     await expect(auth.authenticate('bad token!')).resolves.toBeNull();
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('asks for the second factor instead of creating a session when 2FA is enabled', async () => {
+    const throttle = throttleMock();
+    const { database, query, transactionQuery } = createDatabase(
+      await userRow({ twoFactorEnabled: true }),
+    );
+    const auth = new AdminAuthService(
+      database,
+      throttle as unknown as LoginThrottle,
+      twoFactorStub,
+    );
+
+    const result = await auth.login('editor01', 'editor-password-123', {
+      ip: '198.51.100.1',
+    });
+
+    expect(result).toMatchObject({ mfaRequired: true, expiresIn: 300 });
+    expect('accessToken' in result).toBe(false);
+    expect(query.mock.calls.at(-1)?.[0]).toContain(
+      'INSERT INTO admin_login_challenges',
+    );
+    expect(transactionQuery).not.toHaveBeenCalled();
+    // Bộ đếm sai chỉ được xóa khi hoàn tất cả hai bước.
+    expect(throttle.recordSuccess).not.toHaveBeenCalled();
+  });
+
+  it('flags sessions that must enroll in 2FA when the role requires it', async () => {
+    const { database } = createDatabase(await userRow());
+    const auth = new AdminAuthService(database, allowAll, {
+      isRequiredFor: () => true,
+    } as unknown as TwoFactorService);
+
+    const session = asSession(
+      await auth.login('editor01', 'editor-password-123', {}),
+    );
+    expect(session.twoFactorSetupRequired).toBe(true);
+    expect(session.user.twoFactorEnabled).toBe(false);
   });
 });
