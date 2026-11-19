@@ -2,6 +2,9 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { DatabaseService } from '../database/database.service.js';
 
+/** Trạng thái một cửa sổ đếm: số lần đã đếm và thời điểm hết hạn (epoch ms). */
+export type RateLimitWindow = { hits: number; resetAt: number };
+
 export type RateLimitResult = {
   allowed: boolean;
   remaining: number;
@@ -49,6 +52,17 @@ export class MemoryRateLimitStore {
     }
     window.count += 1;
     return toResult(window.count, window.resetAt, limit, now);
+  }
+
+  /** Số lần đã đếm trong cửa sổ hiện tại, không tăng bộ đếm. */
+  peek(key: string): RateLimitWindow | null {
+    const window = this.windows.get(key);
+    if (!window || window.resetAt <= Date.now()) return null;
+    return { hits: window.count, resetAt: window.resetAt };
+  }
+
+  reset(key: string) {
+    this.windows.delete(key);
   }
 
   removeExpiredWindows() {
@@ -104,37 +118,92 @@ export class RateLimitService implements OnModuleDestroy {
     limit: number,
     windowMs: number,
   ): Promise<RateLimitResult> {
-    if (!this.database.isConfigured) {
-      return this.memory.consume(key, limit, windowMs);
-    }
-    try {
-      const result = await this.database.query<{
-        hits: number;
-        resetAtMs: number;
-      }>(
-        `INSERT INTO rate_limits AS r (key_hash, hits, reset_at)
+    return this.withFallback(
+      async () => {
+        const result = await this.database.query<{
+          hits: number;
+          resetAtMs: number;
+        }>(
+          `INSERT INTO rate_limits AS r (key_hash, hits, reset_at)
          VALUES ($1, 1, NOW() + ($2::int * INTERVAL '1 millisecond'))
          ON CONFLICT (key_hash) DO UPDATE SET
            hits = CASE WHEN r.reset_at <= NOW() THEN 1 ELSE r.hits + 1 END,
            reset_at = CASE WHEN r.reset_at <= NOW() THEN EXCLUDED.reset_at ELSE r.reset_at END
          RETURNING hits, (EXTRACT(EPOCH FROM reset_at) * 1000)::float8 AS "resetAtMs"`,
-        [createHash('sha256').update(key).digest(), windowMs],
-      );
-      const row = result.rows[0];
-      return toResult(row.hits, row.resetAtMs, limit, Date.now());
+          [hashKey(key), windowMs],
+        );
+        const row = result.rows[0];
+        return toResult(row.hits, row.resetAtMs, limit, Date.now());
+      },
+      () => this.memory.consume(key, limit, windowMs),
+    );
+  }
+
+  /**
+   * Đọc bộ đếm mà KHÔNG tăng: dùng cho giới hạn chỉ đếm lần thất bại (kiểm
+   * tra trước, chỉ ghi khi thực sự sai). Trả null khi chưa có hoặc đã hết hạn.
+   */
+  async peek(key: string): Promise<RateLimitWindow | null> {
+    return this.withFallback(
+      async () => {
+        const result = await this.database.query<{
+          hits: number;
+          resetAtMs: number;
+        }>(
+          `SELECT hits, (EXTRACT(EPOCH FROM reset_at) * 1000)::float8 AS "resetAtMs"
+           FROM rate_limits WHERE key_hash = $1 AND reset_at > NOW()`,
+          [hashKey(key)],
+        );
+        const row = result.rows[0];
+        return row ? { hits: row.hits, resetAt: row.resetAtMs } : null;
+      },
+      () => this.memory.peek(key),
+    );
+  }
+
+  /** Xóa bộ đếm, ví dụ sau khi đăng nhập thành công. */
+  async reset(key: string): Promise<void> {
+    await this.withFallback(
+      async () => {
+        await this.database.query(
+          'DELETE FROM rate_limits WHERE key_hash = $1',
+          [hashKey(key)],
+        );
+        // Xóa cả bộ đếm dự phòng nếu trước đó PostgreSQL từng lỗi.
+        this.memory.reset(key);
+      },
+      () => this.memory.reset(key),
+    );
+  }
+
+  /**
+   * Chạy thao tác trên PostgreSQL; chưa cấu hình hoặc lỗi thì dùng bộ đếm
+   * trong RAM của process (ưu tiên tính sẵn sàng).
+   */
+  private async withFallback<Result>(
+    shared: () => Promise<Result>,
+    local: () => Result,
+  ): Promise<Result> {
+    if (!this.database.isConfigured) return local();
+    try {
+      return await shared();
     } catch (error) {
-      // Ưu tiên tính sẵn sàng: PostgreSQL lỗi thì vẫn giới hạn theo từng process.
       if (Date.now() - this.lastFallbackWarningAt > 60_000) {
         this.lastFallbackWarningAt = Date.now();
         this.logger.warn(
           `Shared rate limiter unavailable, using in-memory fallback: ${error instanceof Error ? error.message : 'unknown error'}`,
         );
       }
-      return this.memory.consume(key, limit, windowMs);
+      return local();
     }
   }
 
   onModuleDestroy() {
     clearInterval(this.cleanupTimer);
   }
+}
+
+/** Khóa được băm SHA-256 nên bảng không lưu IP hay tên đăng nhập dạng thô. */
+function hashKey(key: string) {
+  return createHash('sha256').update(key).digest();
 }
