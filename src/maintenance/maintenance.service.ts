@@ -70,6 +70,11 @@ export class MaintenanceService
             OR revoked_at < NOW() - INTERVAL '30 days'`,
         );
         await client.query('DELETE FROM rate_limits WHERE reset_at < NOW()');
+        // Mã thử thách đăng nhập 2FA chỉ sống 5 phút; giữ 1 ngày để tra cứu.
+        await client.query(
+          `DELETE FROM admin_login_challenges
+           WHERE expires_at < NOW() - INTERVAL '1 day'`,
+        );
       },
     );
   }
