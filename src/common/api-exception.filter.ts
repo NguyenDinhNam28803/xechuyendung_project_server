@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { TooManyAttemptsException } from './too-many-attempts.exception.js';
 
 export const internalErrorMessage =
   'Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.';
@@ -30,6 +31,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const requestId = typeof header === 'string' ? header : undefined;
 
     if (exception instanceof HttpException) {
+      if (exception instanceof TooManyAttemptsException) {
+        response.setHeader('Retry-After', String(exception.retryAfterSeconds));
+      }
       const status = exception.getStatus();
       const body = exception.getResponse();
       const payload =

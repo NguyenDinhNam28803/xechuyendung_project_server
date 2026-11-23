@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  Ip,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -18,15 +19,26 @@ import { type AdminPrincipal, CurrentAdmin } from './admin-principal.js';
 export class AuthController {
   constructor(private readonly auth: AdminAuthService) {}
 
+  /**
+   * Hai lớp giới hạn:
+   *  - Guard: 20 request/IP/15 phút, đếm mọi request, chống spam lưu lượng.
+   *    Đủ rộng để nhiều người dùng chung một IP văn phòng không chặn nhau.
+   *  - LoginThrottle (trong service): chỉ đếm lần SAI, theo cặp (IP, tài
+   *    khoản) và theo tài khoản; xem login-throttle.ts.
+   */
   @Post('login')
   @HttpCode(200)
-  @RateLimit(5, 15 * 60 * 1000)
+  @RateLimit(20, 15 * 60 * 1000)
   @UseGuards(RateLimitGuard)
-  login(@Body() body: unknown, @Headers('user-agent') userAgent?: string) {
+  login(
+    @Body() body: unknown,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent?: string,
+  ) {
     if (!isRecord(body)) {
       throw new BadRequestException('Dữ liệu đăng nhập không hợp lệ.');
     }
-    return this.auth.login(body.username, body.password, { userAgent });
+    return this.auth.login(body.username, body.password, { ip, userAgent });
   }
 
   /** Thu hồi phiên hiện tại; token không còn dùng được kể cả khi bị lộ. */

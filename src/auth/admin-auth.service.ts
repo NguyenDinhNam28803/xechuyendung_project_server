@@ -1,6 +1,4 @@
 import {
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
   OnApplicationBootstrap,
@@ -10,8 +8,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { insertActivity } from '../activity/activity.service.js';
 import { DatabaseService } from '../database/database.service.js';
-import { RateLimitService } from '../security/rate-limit.service.js';
 import type { AdminPrincipal, AdminRole } from './admin-principal.js';
+import { LoginThrottle } from './login-throttle.js';
 import {
   assertPasswordPolicy,
   burnPasswordCheck,
@@ -22,9 +20,6 @@ import {
 export const sessionLifetimeSeconds = 8 * 60 * 60;
 const lastSeenRefreshSeconds = 5 * 60;
 const invalidCredentialsMessage = 'Tên đăng nhập hoặc mật khẩu không đúng.';
-
-/** Giới hạn theo tài khoản, bổ sung cho giới hạn theo IP ở controller. */
-const perUsernameLimit = { limit: 10, windowMs: 15 * 60 * 1000 };
 
 type UserRow = {
   id: string;
@@ -44,7 +39,11 @@ type SessionRow = {
   lastSeenAt: Date;
 };
 
-export type LoginMetadata = { userAgent?: string };
+export type LoginMetadata = {
+  /** IP của người dùng (request.ip, đã xét TRUST_PROXY). */
+  ip?: string;
+  userAgent?: string;
+};
 
 export function hashSessionToken(token: string) {
   return createHash('sha256').update(token).digest();
@@ -56,7 +55,7 @@ export class AdminAuthService implements OnApplicationBootstrap {
 
   constructor(
     private readonly database: DatabaseService,
-    private readonly rateLimit: RateLimitService,
+    private readonly throttle: LoginThrottle,
   ) {}
 
   /**
@@ -113,17 +112,8 @@ export class AdminAuthService implements OnApplicationBootstrap {
       throw new UnauthorizedException(invalidCredentialsMessage);
     }
 
-    const throttle = await this.rateLimit.consume(
-      `login-user:${username.trim().toLowerCase()}`,
-      perUsernameLimit.limit,
-      perUsernameLimit.windowMs,
-    );
-    if (!throttle.allowed) {
-      throw new HttpException(
-        'Tài khoản tạm khóa đăng nhập do thử sai nhiều lần. Vui lòng thử lại sau.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    const ip = metadata.ip || 'unknown';
+    await this.throttle.assertAllowed(ip, username);
 
     const result = await this.database.query<UserRow>(
       `SELECT id, username, display_name AS "displayName", role,
@@ -133,14 +123,19 @@ export class AdminAuthService implements OnApplicationBootstrap {
     );
     const user = result.rows[0];
     if (!user) {
+      // Đếm cả tên đăng nhập không tồn tại để phản hồi giống hệt tài khoản
+      // có thật (không lộ tài khoản nào tồn tại qua việc bị chặn hay không).
       await burnPasswordCheck(password);
+      await this.throttle.recordFailure(ip, username);
       throw new UnauthorizedException(invalidCredentialsMessage);
     }
     const valid = await verifyPassword(password, user.passwordHash);
     // Tài khoản bị khóa trả cùng thông báo để không lộ trạng thái tài khoản.
     if (!valid || !user.isActive) {
+      await this.throttle.recordFailure(ip, username);
       throw new UnauthorizedException(invalidCredentialsMessage);
     }
+    await this.throttle.recordSuccess(ip, username);
 
     const token = randomBytes(32).toString('base64url');
     await this.database.withTransaction(async (client) => {

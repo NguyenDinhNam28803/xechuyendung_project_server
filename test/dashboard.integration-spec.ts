@@ -11,6 +11,7 @@ import { parseSort } from '../src/common/sorting.js';
 import { addDays, todayInBusinessZone } from '../src/common/time.js';
 import { ContactSubmissionsService } from '../src/contact-submissions/contact-submissions.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
+import { LoginThrottle } from '../src/auth/login-throttle.js';
 import { RateLimitService } from '../src/security/rate-limit.service.js';
 import { StatsService } from '../src/stats/stats.service.js';
 import { VehicleCategoriesService } from '../src/vehicle-categories/vehicle-categories.service.js';
@@ -60,7 +61,7 @@ describeIntegration('PostgreSQL integration: dashboard v2', () => {
       [`dash_${suffix}`, hash],
     );
     ownerId = owner.rows[0].id;
-    const auth = new AdminAuthService(database, rateLimit);
+    const auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
     const login = await auth.login(`dash_${suffix}`, 'dashboard-password-123', {
       userAgent: 'integration-a',
     });
@@ -322,7 +323,7 @@ describeIntegration('PostgreSQL integration: dashboard v2', () => {
   }, 30_000);
 
   it('lists and revokes admin sessions', async () => {
-    const auth = new AdminAuthService(database, rateLimit);
+    const auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
     const sessions = new AdminSessionsService(database);
     const second = await auth.login(
       `dash_${suffix}`,

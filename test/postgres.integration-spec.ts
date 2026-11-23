@@ -8,6 +8,7 @@ import { AdminUsersService } from '../src/admin-users/admin-users.service.js';
 import { AdminAuthService } from '../src/auth/admin-auth.service.js';
 import type { AdminPrincipal } from '../src/auth/admin-principal.js';
 import { ContactSubmissionsService } from '../src/contact-submissions/contact-submissions.service.js';
+import { LoginThrottle } from '../src/auth/login-throttle.js';
 import { RateLimitService } from '../src/security/rate-limit.service.js';
 import { VehiclesService } from '../src/vehicles/vehicles.service.js';
 import { parseContactSubmission } from '../src/contact-submissions/contact-submissions.validation.js';
@@ -69,7 +70,7 @@ describeIntegration('PostgreSQL integration', () => {
     });
     submissions = new ContactSubmissionsService(database);
     rateLimit = new RateLimitService(database);
-    auth = new AdminAuthService(database, rateLimit);
+    auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
     users = new AdminUsersService(database);
     await database.checkHealth();
   }, 30_000);
@@ -255,6 +256,40 @@ describeIntegration('PostgreSQL integration', () => {
     expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
     other.onModuleDestroy();
   });
+
+  it('lets the owner sign in from another IP while an attacker IP is blocked', async () => {
+    const username = `owner_${randomUUID().slice(0, 8)}`;
+    const passwordHash = await import('../src/auth/password.js').then(
+      (module) => module.hashPassword('owner-password-123'),
+    );
+    const created = await pool.query<{ id: string }>(
+      `INSERT INTO admin_users (username, display_name, password_hash, role)
+       VALUES ($1, 'Owner', $2, 'admin') RETURNING id`,
+      [username, passwordHash],
+    );
+    const attacker = { ip: '203.0.113.66' };
+    const owner = { ip: '198.51.100.7' };
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await expect(
+        auth.login(username, 'wrong-password-000', attacker),
+      ).rejects.toMatchObject({ status: 401 });
+    }
+    await expect(
+      auth.login(username, 'wrong-password-000', attacker),
+    ).rejects.toMatchObject({ status: 429 });
+    // Kẻ tấn công bị chặn cả khi đoán đúng mật khẩu từ IP đó.
+    await expect(
+      auth.login(username, 'owner-password-123', attacker),
+    ).rejects.toMatchObject({ status: 429 });
+
+    const session = await auth.login(username, 'owner-password-123', owner);
+    expect(session.user.username).toBe(username);
+
+    await pool.query('DELETE FROM admin_users WHERE id = $1', [
+      created.rows[0].id,
+    ]);
+  }, 30_000);
 
   it('creates trigram search indexes when pg_trgm is available', async () => {
     const indexes = await pool.query<{ indexname: string }>(
