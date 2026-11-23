@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Xe Chuyên Dụng API
-  version: 1.2.0
+  version: 1.3.0
   description: Public content, admin CMS, activity history, and contact intake API.
 servers:
   - url: http://localhost:4000
@@ -15,6 +15,7 @@ tags:
   - name: Admin content
   - name: Contact submissions
   - name: Admin users
+  - name: Two-factor authentication
   - name: Admin dashboard
 paths:
   /health/live:
@@ -60,7 +61,9 @@ paths:
         clears the (IP, username) counter, so an attacker cannot lock the owner
         out from a different IP. Blocked requests get 429 with Retry-After.
         Unknown users, wrong passwords and disabled accounts all return the
-        same 401 message.
+        same 401 message. When the account has two-factor authentication
+        enabled, no session is created: the response carries a 5-minute
+        challengeToken to send to /api/v1/auth/login/verify with the code.
       requestBody:
         required: true
         content:
@@ -73,21 +76,195 @@ paths:
                 password: { type: string, format: password }
       responses:
         "200":
-          description: Login succeeded.
+          description: Password accepted; either a session or a 2FA challenge.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/LoginSession"
+                  - $ref: "#/components/schemas/TwoFactorChallenge"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/auth/login/verify:
+    post:
+      tags: [Authentication]
+      summary: Complete a login with a TOTP code or a one-time recovery code
+      description: >
+        Send exactly one of code (6 digits) or recoveryCode. A challenge
+        allows at most 5 attempts and expires after 5 minutes. Wrong codes
+        count towards the same (IP, username) and per-username failure limits
+        as wrong passwords. A TOTP code that was already used is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeToken]
+              additionalProperties: false
+              properties:
+                challengeToken: { type: string }
+                code: { type: string, pattern: "^[0-9 ]{6,7}$" }
+                recoveryCode: { type: string, description: "XXXX-XXXX-XXXX-XXXX; dashes and case are ignored." }
+      responses:
+        "200":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/LoginSession"
+                  - type: object
+                    properties:
+                      recoveryCodesRemaining:
+                        type: integer
+                        description: Present only when a recovery code was used.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/admin/account/2fa:
+    get:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Two-factor status of the current account
+      description: Allowed while the session is restricted for missing 2FA enrollment.
+      responses:
+        "200":
+          description: Current status.
           content:
             application/json:
               schema:
                 type: object
-                required: [accessToken, expiresIn, user]
+                required: [enabled, enabledAt, required, recoveryCodesRemaining]
                 properties:
-                  accessToken:
-                    type: string
-                    description: Opaque random token; the server stores only its SHA-256 hash.
-                  expiresIn: { type: integer, description: Lifetime in seconds (28800). }
-                  user: { $ref: "#/components/schemas/AdminIdentity" }
+                  enabled: { type: boolean }
+                  enabledAt: { type: [string, "null"], format: date-time }
+                  required: { type: boolean, description: True when the account's role must use 2FA. }
+                  recoveryCodesRemaining: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/admin/account/2fa/setup:
+    post:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Start enrollment and get the secret to add to an authenticator app
+      description: >
+        Creates a pending secret valid for 15 minutes. The client renders the
+        otpauthUri as a QR code. Allowed while the session is restricted.
+      responses:
+        "200":
+          description: Pending secret.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauthUri, expiresIn]
+                properties:
+                  secret: { type: string, description: Base32 secret for manual entry. }
+                  otpauthUri: { type: string }
+                  expiresIn: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /api/v1/admin/account/2fa/confirm:
+    post:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Confirm enrollment with a code from the app
+      description: >
+        Enables 2FA, returns 10 recovery codes (shown only this once) and
+        revokes every other session of the account; the current session is
+        kept. Allowed while the session is restricted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorCode" }
+      responses:
+        "200":
+          description: 2FA enabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, recoveryCodes]
+                properties:
+                  enabled: { type: boolean, const: true }
+                  recoveryCodes: { $ref: "#/components/schemas/RecoveryCodes" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/admin/account/2fa/disable:
+    post:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Turn 2FA off (only when the role does not require it)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, code]
+              properties:
+                password: { type: string, format: password }
+                code: { type: string }
+      responses:
+        "200": { description: 2FA disabled. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/admin/account/2fa/recovery-codes:
+    post:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Replace the recovery codes (old codes stop working)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorCode" }
+      responses:
+        "200":
+          description: New recovery codes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recoveryCodes]
+                properties:
+                  recoveryCodes: { $ref: "#/components/schemas/RecoveryCodes" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+  /api/v1/admin/users/{id}/2fa/reset:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      tags: [Two-factor authentication]
+      security: [{ AdminBearer: [] }]
+      summary: Reset another account's 2FA (role admin, own 2FA enabled)
+      description: >
+        Clears the secret and recovery codes and revokes every session of the
+        account; it must enroll again at its next login. Not allowed on the
+        caller's own account.
+      responses:
+        "200":
+          description: Reset done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reset, sessionsRevoked]
+                properties:
+                  reset: { type: boolean, const: true }
+                  sessionsRevoked: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/auth/logout:
     post:
       tags: [Authentication]
@@ -100,13 +277,20 @@ paths:
     get:
       tags: [Authentication]
       security: [{ AdminBearer: [] }]
-      summary: Current admin identity and role
+      summary: Current admin identity, role and 2FA state
+      description: Allowed while the session is restricted for missing 2FA enrollment.
       responses:
         "200":
           description: Authenticated admin.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AdminIdentity" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/AdminIdentity"
+                  - type: object
+                    required: [twoFactorSetupRequired]
+                    properties:
+                      twoFactorSetupRequired: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/admin/account/password:
     post:
@@ -931,12 +1115,45 @@ components:
       description: admin manages accounts; editor manages content and contacts.
     AdminIdentity:
       type: object
-      required: [id, username, displayName, role]
+      required: [id, username, displayName, role, twoFactorEnabled]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
         displayName: { type: string }
         role: { $ref: "#/components/schemas/AdminRole" }
+        twoFactorEnabled: { type: boolean }
+    LoginSession:
+      type: object
+      required: [accessToken, expiresIn, twoFactorSetupRequired, user]
+      properties:
+        accessToken:
+          type: string
+          description: Opaque random token; the server stores only its SHA-256 hash.
+        expiresIn: { type: integer, description: Lifetime in seconds (28800). }
+        twoFactorSetupRequired:
+          type: boolean
+          description: >
+            True when the role requires 2FA and the account has not enrolled.
+            The session is then restricted: other admin endpoints answer 403
+            with code TWO_FACTOR_SETUP_REQUIRED until enrollment is confirmed.
+        user: { $ref: "#/components/schemas/AdminIdentity" }
+    TwoFactorChallenge:
+      type: object
+      required: [mfaRequired, challengeToken, expiresIn]
+      properties:
+        mfaRequired: { type: boolean, const: true }
+        challengeToken: { type: string }
+        expiresIn: { type: integer, description: Seconds (300). }
+    TwoFactorCode:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: 6-digit TOTP code. }
+    RecoveryCodes:
+      type: array
+      minItems: 10
+      maxItems: 10
+      items: { type: string, description: "XXXX-XXXX-XXXX-XXXX" }
     AdminUser:
       allOf:
         - $ref: "#/components/schemas/AdminIdentity"

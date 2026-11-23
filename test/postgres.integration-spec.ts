@@ -9,6 +9,8 @@ import { AdminAuthService } from '../src/auth/admin-auth.service.js';
 import type { AdminPrincipal } from '../src/auth/admin-principal.js';
 import { ContactSubmissionsService } from '../src/contact-submissions/contact-submissions.service.js';
 import { LoginThrottle } from '../src/auth/login-throttle.js';
+import { TwoFactorService } from '../src/auth/two-factor.service.js';
+import { asSession } from './helpers/session.js';
 import { RateLimitService } from '../src/security/rate-limit.service.js';
 import { VehiclesService } from '../src/vehicles/vehicles.service.js';
 import { parseContactSubmission } from '../src/contact-submissions/contact-submissions.validation.js';
@@ -70,7 +72,11 @@ describeIntegration('PostgreSQL integration', () => {
     });
     submissions = new ContactSubmissionsService(database);
     rateLimit = new RateLimitService(database);
-    auth = new AdminAuthService(database, new LoginThrottle(rateLimit));
+    auth = new AdminAuthService(
+      database,
+      new LoginThrottle(rateLimit),
+      new TwoFactorService(database, rateLimit),
+    );
     users = new AdminUsersService(database);
     await database.checkHealth();
   }, 30_000);
@@ -161,12 +167,10 @@ describeIntegration('PostgreSQL integration', () => {
       [ownerName, ownerHash],
     );
 
-    const login = await auth.login(
-      ownerName.toUpperCase(),
-      'owner-password-123',
-      {
+    const login = asSession(
+      await auth.login(ownerName.toUpperCase(), 'owner-password-123', {
         userAgent: 'integration',
-      },
+      }),
     );
     const principal = (await auth.authenticate(
       login.accessToken,
@@ -182,10 +186,8 @@ describeIntegration('PostgreSQL integration', () => {
       },
       { id: principal.id, username: principal.username },
     );
-    const editorLogin = await auth.login(
-      `editor_${suffix}`,
-      'editor-password-123',
-      {},
+    const editorLogin = asSession(
+      await auth.login(`editor_${suffix}`, 'editor-password-123', {}),
     );
     expect(await auth.authenticate(editorLogin.accessToken)).not.toBeNull();
 
@@ -283,7 +285,9 @@ describeIntegration('PostgreSQL integration', () => {
       auth.login(username, 'owner-password-123', attacker),
     ).rejects.toMatchObject({ status: 429 });
 
-    const session = await auth.login(username, 'owner-password-123', owner);
+    const session = asSession(
+      await auth.login(username, 'owner-password-123', owner),
+    );
     expect(session.user.username).toBe(username);
 
     await pool.query('DELETE FROM admin_users WHERE id = $1', [

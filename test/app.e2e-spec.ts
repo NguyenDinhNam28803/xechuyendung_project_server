@@ -143,6 +143,28 @@ describe('AppController (e2e)', () => {
       .expect(401);
   });
 
+  it('two-factor endpoints require authentication and valid input', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/admin/account/2fa')
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/account/2fa/setup')
+      .expect(401);
+    await request(app.getHttpServer())
+      .post(
+        '/api/v1/admin/users/40f050b4-73d1-47f4-b832-c14246d039d4/2fa/reset',
+      )
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login/verify')
+      .send({ challengeToken: 'x'.repeat(43) })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login/verify')
+      .send({ challengeToken: 'not valid', code: '123456' })
+      .expect(401);
+  });
+
   it('rate limits repeated admin login requests from one IP', async () => {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await request(app.getHttpServer())

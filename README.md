@@ -49,6 +49,44 @@ tức thì và biết chính xác ai thao tác.
 khoản `admin` từ `ADMIN_USERNAME`/`ADMIN_PASSWORD` lúc khởi động. Sau đó hai
 biến này không còn tác dụng — đổi mật khẩu trong trang quản trị.
 
+### Xác thực hai lớp (2FA)
+
+- **TOTP** (RFC 6238, mã 6 số mỗi 30 giây) qua Google Authenticator, Authy,
+  1Password…, dùng thư viện `otplib`. Chấp nhận lệch ±30 giây; máy chủ phải
+  **đồng bộ giờ NTP** (`timedatectl status` → `System clock synchronized: yes`).
+- **Bắt buộc cho mọi vai trò** (`admin`, `editor`) theo mặc định. Tài khoản
+  chưa đăng ký vẫn đăng nhập được bằng mật khẩu nhưng nhận **phiên bị hạn
+  chế**: mọi API quản trị trả `403` với `code: "TWO_FACTOR_SETUP_REQUIRED"`, trừ
+  `/auth/me`, `/auth/logout` và `/admin/account/2fa*` (để đăng ký).
+- **Đăng nhập hai bước:** mật khẩu đúng → `{ mfaRequired, challengeToken }`
+  (5 phút, tối đa 5 lần nhập) → `POST /auth/login/verify` với `code` hoặc
+  `recoveryCode`. Mã sai được tính vào cùng giới hạn đăng nhập sai theo
+  (IP, tài khoản), nên biết mật khẩu cũng không dò được mã. Mã TOTP đã dùng
+  không dùng lại được (lưu `totp_last_step`, cập nhật có điều kiện).
+- **Mã khôi phục:** 10 mã dùng một lần, chỉ hiển thị khi bật 2FA hoặc tạo lại;
+  database chỉ lưu SHA-256.
+- **Secret TOTP mã hóa AES-256-GCM** bằng `TOTP_ENCRYPTION_KEY` trước khi lưu.
+  Lộ bản backup database không đủ để sinh mã. **Mất khóa = mọi người phải
+  đăng ký lại**, nên sao lưu khóa tách biệt với database.
+- Bật 2FA thu hồi mọi phiên khác của tài khoản (giữ phiên hiện tại). Admin đã
+  bật 2FA có thể **đặt lại 2FA** cho tài khoản khác (mất điện thoại); mọi phiên
+  của tài khoản đó bị thu hồi.
+- **Đường thoát khẩn cấp** khi không còn admin nào đăng nhập được, chạy trên
+  máy có quyền truy cập database:
+
+  ```bash
+  npm run admin:reset-2fa -- <tên đăng nhập>
+  ```
+
+- Audit: bật/tắt/đặt lại 2FA, tạo lại mã khôi phục ghi dưới hành động
+  `UPDATE` kèm nhãn mô tả; đăng nhập ghi `LOGIN` với nhãn "(2FA)" hoặc
+  "(mã khôi phục 2FA)".
+
+**Thứ tự triển khai:** API này bắt buộc 2FA ngay khi chạy. Nếu trang quản trị
+(client) chưa có giao diện đăng ký 2FA, đặt tạm `TWO_FACTOR_REQUIRED_ROLES=none`
+để không ai bị kẹt ở phiên hạn chế; bỏ biến này (hoặc đặt `admin,editor`) sau
+khi client có giao diện 2FA.
+
 ## Yêu cầu và cấu hình
 
 Yêu cầu Node.js 22/npm và PostgreSQL (đã kiểm thử với 16). Tạo `.env` (không
@@ -59,6 +97,8 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 DATABASE_SSL=true
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace-with-a-strong-unique-password
+TOTP_ENCRYPTION_KEY=
+TWO_FACTOR_REQUIRED_ROLES=admin,editor
 PORT=4000
 TRUST_PROXY=0
 ACTIVITY_RETENTION_DAYS=
@@ -67,6 +107,10 @@ ACTIVITY_RETENTION_DAYS=
 - `DATABASE_URL`: connection string PostgreSQL; giữ bí mật.
 - `DATABASE_SSL=true`: bật TLS và xác thực chứng chỉ database.
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`: chỉ dùng để tạo quản trị viên đầu tiên.
+- `TOTP_ENCRYPTION_KEY`: 32 byte base64, bắt buộc để dùng 2FA. Tạo bằng
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+- `TWO_FACTOR_REQUIRED_ROLES`: vai trò bắt buộc 2FA; không đặt = `admin,editor`;
+  `none` = tắt bắt buộc (chỉ dùng tạm khi chuyển đổi).
 - `PORT`: mặc định `4000`.
 - `TRUST_PROXY`: mặc định tắt. Khi chạy sau reverse proxy, đặt đúng số hop
   hoặc subnet tin cậy để rate limit nhận IP client thật.
@@ -236,6 +280,7 @@ file trong một transaction và được bảo vệ bằng advisory lock.
 | `005_admin_users_sessions_rate_limits.sql` | Tài khoản, phiên, rate limit, `actor_id`, trigger `updated_at` |
 | `006_search_trigram_indexes.sql`           | Index `pg_trgm` cho tìm kiếm                          |
 | `007_dashboard_stats_sessions_categories.sql` | Index thống kê, `first_handled_at`, `contact_daily_stats`, bảng `vehicle_categories` |
+| `008_two_factor_auth.sql`                  | Cột TOTP trên `admin_users`, `admin_recovery_codes`, `admin_login_challenges` |
 
 Nâng cấp từ phiên bản cũ: chạy `npm run db:migrate`, đảm bảo
 `ADMIN_USERNAME`/`ADMIN_PASSWORD` (mật khẩu ≥ 12 ký tự) có trong môi trường
@@ -301,7 +346,7 @@ npm run start:prod
   (`contact-submissions.validation.ts`), chưa đọc từ `vehicle_categories`.
 - Xóa thủ công một yêu cầu liên hệ cũng làm nó biến khỏi số liệu thống kê
   (chỉ job retention mới lưu số đếm trước khi xóa).
-- Chưa có xác thực hai lớp (2FA) cho tài khoản quản trị.
+- 2FA chỉ hỗ trợ TOTP và mã khôi phục; chưa có passkey/WebAuthn.
 - Tìm kiếm chưa bỏ dấu tiếng Việt (cần extension `unaccent` và hàm wrapper
   IMMUTABLE nếu muốn tìm "xe cuu ho" ra "xe cứu hộ").
 - Metrics/alerting và diễn tập restore cần cấu hình ở hạ tầng.

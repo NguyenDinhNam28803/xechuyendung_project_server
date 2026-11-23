@@ -1,31 +1,11 @@
-import 'dotenv/config';
-import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Pool } from 'pg';
+import { createScriptPool } from './db-pool.js';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = join(directory, '..', 'migrations');
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error('DATABASE_URL must be configured before running migrations.');
-}
-
-const pool = new Pool({
-  connectionString,
-  // Giống src/database/ssl-options.ts: DATABASE_SSL_CA cho CA riêng (Supabase).
-  ssl:
-    process.env.DATABASE_SSL === 'true'
-      ? {
-          rejectUnauthorized: true,
-          ...(process.env.DATABASE_SSL_CA?.trim()
-            ? { ca: readFileSync(process.env.DATABASE_SSL_CA.trim(), 'utf8') }
-            : {}),
-        }
-      : undefined,
-});
+const pool = createScriptPool();
 
 const migrationLockId = 7_804_202_026;
 const client = await pool.connect();

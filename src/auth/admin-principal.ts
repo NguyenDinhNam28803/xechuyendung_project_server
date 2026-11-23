@@ -17,6 +17,13 @@ export type AdminPrincipal = {
   displayName: string;
   role: AdminRole;
   sessionId: string;
+  twoFactorEnabled: boolean;
+  /**
+   * Vai trò bắt buộc 2FA nhưng tài khoản chưa đăng ký: phiên bị hạn chế, chỉ
+   * dùng được các route gắn @AllowWithoutTwoFactor() (thiết lập 2FA, me,
+   * đăng xuất) cho tới khi đăng ký xong.
+   */
+  twoFactorSetupRequired: boolean;
 };
 
 export type AuthenticatedRequest = Request & { admin?: AdminPrincipal };
@@ -26,6 +33,14 @@ export function toActor(principal: AdminPrincipal): Actor {
 }
 
 export const rolesMetadataKey = 'admin-roles';
+export const allowWithoutTwoFactorKey = 'admin-allow-without-two-factor';
+
+/** Route dùng được cả khi phiên đang bị hạn chế vì chưa đăng ký 2FA bắt buộc. */
+export const AllowWithoutTwoFactor = () =>
+  SetMetadata(allowWithoutTwoFactorKey, true);
+
+/** Mã lỗi máy đọc được để client chuyển tới trang thiết lập 2FA. */
+export const twoFactorSetupRequiredCode = 'TWO_FACTOR_SETUP_REQUIRED';
 
 /**
  * Giới hạn route cho các vai trò được liệt kê. Route không gắn @Roles chỉ cần
